@@ -1,0 +1,9 @@
+Django>=5.0
+djangorestframework
+djangorestframework-simplejwt
+django-environ
+psycopg2-binary
+stripe
+gunicorn
+whitenoise[brotli]
+django-cors-headers

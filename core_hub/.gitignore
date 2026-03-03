@@ -1,0 +1,8 @@
+.env
+__pycache__/
+*.py[cod]
+db.sqlite3
+staticfiles/
+gunicorn.ctl
+test_results.log
+test_detailed.log

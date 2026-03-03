@@ -1,0 +1,180 @@
+version: '3.8'
+
+services:
+  db:
+    image: postgres:15
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_DB=core_hub_db
+    ports:
+      - "5432:5432"
+
+  backend:
+    build:
+      context: ./core_hub
+      dockerfile: Dockerfile
+    command: gunicorn --bind 0.0.0.0:8000 core_hub.wsgi:application
+    volumes:
+      - ./core_hub:/app
+    environment:
+      - DJANGO_SETTINGS_MODULE=core_hub.settings
+      - SECRET_KEY=django-insecure-change-me-in-production
+      - DEBUG=True
+      - ALLOWED_HOSTS=*
+      - DATABASE_URL=postgres://postgres:postgres@db:5432/core_hub_db
+      - STRIPE_PUBLIC_KEY=pk_test_placeholder
+      - STRIPE_SECRET_KEY=sk_test_placeholder
+      - STRIPE_WEBHOOK_SECRET=whsec_placeholder
+      - FRONTEND_URL=http://localhost:3000
+    ports:
+      - "8000:8000"
+    depends_on:
+      - db
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    environment:
+      - NEXT_PUBLIC_API_URL=http://localhost:8000
+      - API_URL=http://backend:8000
+      - NEXTAUTH_URL=http://localhost:3000
+      - NEXTAUTH_SECRET=a-very-long-random-secret-change-me-in-prod
+      - GOOGLE_OAUTH_CLIENT_ID=${GOOGLE_OAUTH_CLIENT_ID:-815443716921-mnu1ram1pmmjf9nl5b6vc35rba7l0pgm.apps.googleusercontent.com}
+      - GOOGLE_OAUTH_CLIENT_SECRET=${GOOGLE_OAUTH_CLIENT_SECRET:-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}
+    ports:
+      - "3000:3000"
+    depends_on:
+      - backend
+
+  # ─── DISEASE PREDICTION INTEGRATION ────────────────────────────────────
+
+  dp_redis:
+    image: redis:alpine
+    ports:
+      - "6379:6379"
+
+  dp_backend:
+    build:
+      context: D:/Disease Prediction
+      dockerfile: web_app/backend/Dockerfile
+    image: diseaseprediction-backend:latest
+    ports:
+      - "8001:8000"
+    command: uvicorn web_app.backend.main:app --host 0.0.0.0 --port 8000
+    volumes:
+      - D:/Disease Prediction/web_app/backend:/app/web_app/backend
+      - D:/Disease Prediction/saved_models:/app/saved_models
+      - D:/Disease Prediction/saved_models_onnx:/app/saved_models_onnx
+      - D:/Disease Prediction/external:/app/external
+    environment:
+      - REDIS_URL=redis://dp_redis:6379/0
+      - ALLOWED_ORIGINS=http://localhost:5173
+      - ALLOW_ALL_ORIGINS=True
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=compute,utility
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [ gpu ]
+    depends_on:
+      - dp_redis
+
+  dp_worker_heavy:
+    image: diseaseprediction-backend:latest
+    command: celery -A web_app.backend.celery_app worker --loglevel=info --pool=threads --concurrency=2 -Q q_heavy_cv,celery
+    volumes:
+      - D:/Disease Prediction/web_app/backend:/app/web_app/backend
+      - D:/Disease Prediction/saved_models:/app/saved_models
+      - D:/Disease Prediction/saved_models_onnx:/app/saved_models_onnx
+      - D:/Disease Prediction/external:/app/external
+      - dp_hf_cache:/root/.cache/huggingface
+    environment:
+      - REDIS_URL=redis://dp_redis:6379/0
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=compute,utility
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [ gpu ]
+    depends_on:
+      - dp_redis
+      - dp_backend
+
+  dp_worker_light:
+    image: diseaseprediction-backend:latest
+    command: celery -A web_app.backend.celery_app worker --loglevel=info --pool=threads --concurrency=4 -Q q_lightweight
+    volumes:
+      - D:/Disease Prediction/web_app/backend:/app/web_app/backend
+      - D:/Disease Prediction/saved_models:/app/saved_models
+      - D:/Disease Prediction/saved_models_onnx:/app/saved_models_onnx
+      - D:/Disease Prediction/external:/app/external
+    environment:
+      - REDIS_URL=redis://dp_redis:6379/0
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=compute,utility
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [ gpu ]
+    depends_on:
+      - dp_redis
+      - dp_backend
+
+  dp_frontend:
+    build:
+      context: D:/Disease Prediction
+      dockerfile: web_app/frontend/Dockerfile
+    ports:
+      - "5173:80"
+    depends_on:
+      - dp_backend
+
+  dp_flower:
+    image: diseaseprediction-backend:latest
+    command: celery -A web_app.backend.celery_app flower --port=5555 --basic_auth=admin:changeme123
+    ports:
+      - "5555:5555"
+    environment:
+      - REDIS_URL=redis://dp_redis:6379/0
+      - FLOWER_BASIC_AUTH=admin:changeme123
+    depends_on:
+      - dp_redis
+
+  dp_prometheus:
+    image: prom/prometheus:latest
+    volumes:
+      - D:/Disease Prediction/prometheus.yml:/etc/prometheus/prometheus.yml
+    ports:
+      - "9090:9090"
+
+  dp_grafana:
+    image: grafana/grafana:latest
+    ports:
+      - "4000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+
+  dp_celery_exporter:
+    image: danihodovic/celery-exporter
+    command: [ "--broker", "redis://dp_redis:6379/0" ]
+    ports:
+      - "9808:9808"
+    depends_on:
+      - dp_redis
+
+volumes:
+  postgres_data:
+  dp_hf_cache:
