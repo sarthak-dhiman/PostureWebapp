@@ -1,15 +1,24 @@
 "use client"
 
-import { useSession, signOut } from "next-auth/react"
+import { useSession } from "next-auth/react"
 import Link from "next/link"
 import { usePathname } from "next/navigation"
 import { Button } from "@/components/ui/button"
-import { ShieldCheck, HeartPulse, LayoutDashboard, Settings, LogOut, Loader2, Camera, Activity } from "lucide-react"
+import { ShieldCheck, HeartPulse, LayoutDashboard, Settings, Loader2, Camera, Activity } from "lucide-react"
+
+interface SessionUser {
+    role?: string;
+    [key: string]: any;
+}
+
+interface Session {
+    user?: SessionUser;
+}
 
 export function Navbar() {
-    const { data: session, status } = useSession()
+    const { data: session, status } = useSession() as { data: Session | null, status: string }
     const pathname = usePathname()
-    const isAdmin = (session?.user as any)?.role === "ADMIN"
+    const isAdmin = session?.user?.role === "ADMIN"
 
     // Optional: Hide on login/signup to keep them clean
     if (pathname === "/login" || pathname === "/signup") return null

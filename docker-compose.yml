@@ -6,8 +6,9 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
     environment:
-      - POSTGRES_USER=postgres
-      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_USER=${POSTGRES_USER:-postgres}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-change-me-in-production}
+      - POSTGRES_HOST_AUTH_METHOD=${POSTGRES_HOST_AUTH_METHOD:-trust}
       - POSTGRES_DB=core_hub_db
     ports:
       - "5432:5432"
@@ -16,21 +17,24 @@ services:
     build:
       context: ./core_hub
       dockerfile: Dockerfile
-    command: daphne -b 0.0.0.0 -p 8000 core_hub.asgi:application
+    command: python manage.py runserver 0.0.0.0:8000
     volumes:
       - ./core_hub:/app
     environment:
       - DJANGO_SETTINGS_MODULE=core_hub.settings
-      - SECRET_KEY=django-insecure-change-me-in-production
-      - DEBUG=True
-      - ALLOWED_HOSTS=*
-      - DATABASE_URL=postgres://postgres:postgres@db:5432/core_hub_db
-      - STRIPE_PUBLIC_KEY=pk_test_placeholder
-      - STRIPE_SECRET_KEY=sk_test_placeholder
-      - STRIPE_WEBHOOK_SECRET=whsec_placeholder
+      - SECRET_KEY=${SECRET_KEY:-django-insecure-change-me-in-production}
+      - DEBUG=${DEBUG:-True}
+      - ALLOWED_HOSTS=${ALLOWED_HOSTS:-*}
+      # For local dev you may run Postgres in trust mode (no password). In production,
+      # set `POSTGRES_PASSWORD` and ensure `DATABASE_URL` contains the password.
+      - DATABASE_URL=postgres://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-change-me-in-production}@db:5432/core_hub_db
+      - RAZORPAY_KEY_ID=${RAZORPAY_KEY_ID:-key_test_placeholder}
+      - RAZORPAY_KEY_SECRET=${RAZORPAY_KEY_SECRET:-secret_test_placeholder}
+      - RAZORPAY_WEBHOOK_SECRET=${RAZORPAY_WEBHOOK_SECRET:-whsec_placeholder}
       - FRONTEND_URL=http://localhost:3000
       - GOOGLE_OAUTH_CLIENT_ID=${GOOGLE_OAUTH_CLIENT_ID:-815443716921-mnu1ram1pmmjf9nl5b6vc35rba7l0pgm.apps.googleusercontent.com}
       - GOOGLE_OAUTH_CLIENT_SECRET=${GOOGLE_OAUTH_CLIENT_SECRET:-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}
+      - TURNSTILE_SECRET_KEY=${TURNSTILE_SECRET_KEY:-1x0000000000000000000000000000000AA}
     ports:
       - "8000:8000"
     depends_on:
@@ -40,13 +44,32 @@ services:
     build:
       context: ./frontend
       dockerfile: Dockerfile
+    command: sh -c "mkdir -p /app/.next/dev/logs && npm run dev"
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
     environment:
+      - WATCHPACK_POLLING=true
+      - TURBOPACK_DISABLE_FSNOTIFY=1
+      - NEXT_TELEMETRY_DISABLED=1
       - NEXT_PUBLIC_API_URL=http://localhost:8000
       - API_URL=http://backend:8000
       - NEXTAUTH_URL=http://localhost:3000
-      - NEXTAUTH_SECRET=a-very-long-random-secret-change-me-in-prod
+      - NEXTAUTH_SECRET=${NEXTAUTH_SECRET:-a-very-long-random-secret-change-me-in-prod}
       - GOOGLE_OAUTH_CLIENT_ID=${GOOGLE_OAUTH_CLIENT_ID:-815443716921-mnu1ram1pmmjf9nl5b6vc35rba7l0pgm.apps.googleusercontent.com}
       - GOOGLE_OAUTH_CLIENT_SECRET=${GOOGLE_OAUTH_CLIENT_SECRET:-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}
+      - NEXT_PUBLIC_TURNSTILE_SITE_KEY=1x00000000000000000000AA
+      - NEXT_PUBLIC_RAZORPAY_KEY_ID=${NEXT_PUBLIC_RAZORPAY_KEY_ID}
+      - NEXT_PUBLIC_RAZORPAY_PLAN_WEBCAM_MO=${NEXT_PUBLIC_RAZORPAY_PLAN_WEBCAM_MO}
+      - NEXT_PUBLIC_RAZORPAY_PLAN_WEBCAM_QTR=${NEXT_PUBLIC_RAZORPAY_PLAN_WEBCAM_QTR}
+      - NEXT_PUBLIC_RAZORPAY_PLAN_WEBCAM_YR=${NEXT_PUBLIC_RAZORPAY_PLAN_WEBCAM_YR}
+      - NEXT_PUBLIC_RAZORPAY_PLAN_HEALTH_MO=${NEXT_PUBLIC_RAZORPAY_PLAN_HEALTH_MO}
+      - NEXT_PUBLIC_RAZORPAY_PLAN_HEALTH_QTR=${NEXT_PUBLIC_RAZORPAY_PLAN_HEALTH_QTR}
+      - NEXT_PUBLIC_RAZORPAY_PLAN_HEALTH_YR=${NEXT_PUBLIC_RAZORPAY_PLAN_HEALTH_YR}
+      - NEXT_PUBLIC_RAZORPAY_PLAN_COMBO_MO=${NEXT_PUBLIC_RAZORPAY_PLAN_COMBO_MO}
+      - NEXT_PUBLIC_RAZORPAY_PLAN_COMBO_QTR=${NEXT_PUBLIC_RAZORPAY_PLAN_COMBO_QTR}
+      - NEXT_PUBLIC_RAZORPAY_PLAN_COMBO_YR=${NEXT_PUBLIC_RAZORPAY_PLAN_COMBO_YR}
+      - NEXT_PUBLIC_RAZORPAY_PLAN_BUSINESS=${NEXT_PUBLIC_RAZORPAY_PLAN_BUSINESS}
     ports:
       - "3000:3000"
     depends_on:
@@ -167,7 +190,7 @@ services:
     ports:
       - "4000:3000"
     environment:
-      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_SECURITY_ADMIN_PASSWORD=${GF_SECURITY_ADMIN_PASSWORD:-change-me-in-production}
 
 volumes:
   postgres_data:

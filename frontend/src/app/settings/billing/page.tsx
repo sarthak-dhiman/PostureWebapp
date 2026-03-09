@@ -6,6 +6,7 @@ import { useState } from "react"
 import { CreditCard, CheckCircle2, AlertTriangle, ExternalLink, Check, Loader2 } from "lucide-react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
+import { apiFetch } from "@/lib/api"
 
 export default function BillingPage() {
     const { sessionStatus, isLoading, user, org, hasSubscription: hasActiveSub, token } = useSubscription()
@@ -23,7 +24,7 @@ export default function BillingPage() {
         setPortalError(null)
 
         try {
-            const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"}/api/v1/billing/customer-portal/`, {
+            const res = await apiFetch(`${process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"}/api/v1/billing/customer-portal/`, {
                 method: "POST",
                 headers: {
                     "Content-Type": "application/json",

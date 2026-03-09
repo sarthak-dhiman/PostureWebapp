@@ -1,0 +1,16 @@
+{% extends "emails/base_email.html" %}
+
+{% block content %}
+<h2 style="color: #0f172a; margin-top: 0;">Welcome to the future of work!</h2>
+<p>Hello <span class="highlight">{{ user_name }}</span>,</p>
+<p>Thank you for choosing Posture OS. To get started with your new digital health and safety workspace, please verify
+    your email address by clicking the button below:</p>
+
+<div style="text-align: center;">
+    <a href="{{ verify_url }}" class="button">Verify Email Address</a>
+</div>
+
+<p>This link will expire in 24 hours. If you haven't recently created an account, you can safely ignore this email.</p>
+
+<p>Best regards,<br>The Posture Team</p>
+{% endblock %}

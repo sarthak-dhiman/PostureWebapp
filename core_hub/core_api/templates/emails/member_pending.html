@@ -1,0 +1,26 @@
+{% extends "emails/base_email.html" %}
+
+{% block content %}
+<h2 style="color: #ef4444; margin-top: 0;">Action Required: Seat Limit Reached</h2>
+<p>Hello <span class="highlight">{{ admin_name }}</span>,</p>
+<p>A user just attempted to join your organization <span class="highlight">{{ org_name }}</span> via an invite link, but
+    they were unable to join because your account has reached its seat limit (<span class="highlight">{{ max_seats }}
+        seats</span>).</p>
+
+<div style="background-color: #fef2f2; border: 1px solid #fecaca; padding: 20px; border-radius: 12px; margin: 20px 0;">
+    <p style="margin: 0; font-size: 14px; color: #991b1b;"><strong>User Waiting:</strong> {{ member_name }} ({{
+        member_email }})</p>
+</div>
+
+<p>To allow this user to join, you can:</p>
+<ol>
+    <li><strong>Upgrade your plan</strong> to add more seats.</li>
+    <li><strong>Remove an existing member</strong> to free up a seat.</li>
+</ol>
+
+<div style="text-align: center;">
+    <a href="{{ billing_url }}" class="button">Upgrade Seats</a>
+</div>
+
+<p>Best regards,<br>The Posture Team</p>
+{% endblock %}

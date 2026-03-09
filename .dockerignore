@@ -1,0 +1,27 @@
+# Root dockerignore to exclude large local folders and common transient files
+venv/
+env/
+.venv/
+node_modules/
+.git/
+.gitignore
+.DS_Store
+*.log
+__pycache__/
+*.py[cod]
+db.sqlite3
+core_hub/db.sqlite3
+frontend/.next/
+frontend/node_modules/
+frontend/.vercel/
+Disease Prediction/
+D:\\Disease Prediction/
+dp_hf_cache/
+saved_models/
+saved_models_onnx/
+external/
+prometheus.yml
+*.env
+*.env.*
+staticfiles/
+public/images/cctv/

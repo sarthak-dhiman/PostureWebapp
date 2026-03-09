@@ -331,7 +331,7 @@ class TestBillingEndpoints(TestCase):
     @patch('stripe.Subscription.retrieve')
     def test_customer_portal(self, mock_retrieve, mock_create):
         # Fake an active subscription on the org
-        self.org.stripe_subscription_id = 'sub_123'
+        self.org.razorpay_subscription_id = 'sub_123'
         self.org.save()
         
         mock_retrieve.return_value.customer = 'cus_456'
@@ -342,7 +342,7 @@ class TestBillingEndpoints(TestCase):
         self.assertEqual(resp.data['url'], 'https://billing.stripe.com/test')
 
     def test_customer_portal_requires_subscription(self):
-        # Org has no stripe_subscription_id
+        # Org has no razorpay_subscription_id
         resp = self.client.post('/api/v1/billing/portal/')
         self.assertEqual(resp.status_code, 400)
 
@@ -364,6 +364,6 @@ class TestBillingEndpoints(TestCase):
         
         self.assertEqual(resp.status_code, 200)
         self.org.refresh_from_db()
-        self.assertEqual(self.org.stripe_subscription_id, 'sub_789')
+        self.assertEqual(self.org.razorpay_subscription_id, 'sub_789')
         self.assertTrue(self.org.is_active)
 

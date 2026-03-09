@@ -11,6 +11,7 @@ import {
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
+import { apiFetch } from "@/lib/api"
 
 const ROLE_LABELS: Record<string, { label: string; color: string }> = {
     SOLO: { label: "Solo User", color: "bg-blue-100 text-blue-700 border-blue-200" },
@@ -27,18 +28,34 @@ export default function SettingsPage() {
     const [portalError, setPortalError] = useState("")
     const [checkoutError, setCheckoutError] = useState("")
 
-    const handleSubscribe = async (priceId: string) => {
+    const handleSubscribe = async (planId: string) => {
         setLoadingCheckout(true)
         setCheckoutError("")
         try {
-            const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"}/api/v1/billing/checkout/`, {
+            const res = await apiFetch(`${process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"}/api/v1/billing/checkout/`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` },
-                body: JSON.stringify({ price_id: priceId })
+                body: JSON.stringify({ plan_id: planId })
             })
             const data = await res.json()
             if (!res.ok) throw new Error(data.detail || data.error || "Checkout failed")
-            if (data.url) window.location.href = data.url
+            if (data.subscription_id) {
+                // Settings page fallback for admin subscribe button
+                const options = {
+                    key: process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID || "",
+                    subscription_id: data.subscription_id,
+                    name: "Posture OS",
+                    description: "Business Subscription",
+                    image: "/icon.png",
+                    handler: function (response: any) {
+                        window.location.reload()
+                    },
+                    prefill: { name: user?.name || "", email: user?.email || "" },
+                    theme: { color: "#7c3aed" },
+                }
+                const rzp = new (window as any).Razorpay(options)
+                rzp.open()
+            }
         } catch (err: any) {
             setCheckoutError(err.message)
         } finally {
@@ -50,7 +67,7 @@ export default function SettingsPage() {
         setLoadingPortal(true)
         setPortalError("")
         try {
-            const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"}/api/v1/billing/portal/`, {
+            const res = await apiFetch(`${process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"}/api/v1/billing/customer-portal/`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` }
             })
@@ -78,6 +95,8 @@ export default function SettingsPage() {
     return (
         <div className="min-h-screen bg-slate-50 pt-24 pb-20">
             <div className="max-w-3xl mx-auto px-4 sm:px-6 space-y-8">
+
+                <script src="https://checkout.razorpay.com/v1/checkout.js" async></script>
 
                 {/* Header */}
                 <div>
@@ -146,9 +165,9 @@ export default function SettingsPage() {
                                     <p className="text-sm text-emerald-700 mt-1">
                                         Your organization has an active subscription. CCTV edge node ingestion and analytics dashboard are enabled.
                                     </p>
-                                    {org?.stripe_subscription_id && (
+                                    {org?.razorpay_subscription_id && (
                                         <p className="text-xs font-mono text-emerald-600/80 mt-1">
-                                            Sub ID: {org?.stripe_subscription_id}
+                                            Sub ID: {org?.razorpay_subscription_id}
                                         </p>
                                     )}
                                 </div>
@@ -167,7 +186,7 @@ export default function SettingsPage() {
                                 </div>
                                 {checkoutError && <p className="text-sm text-red-600 font-medium">{checkoutError}</p>}
                                 <Button
-                                    onClick={() => handleSubscribe("price_mock_business_mo")}
+                                    onClick={() => handleSubscribe(process.env.NEXT_PUBLIC_RAZORPAY_PLAN_BUSINESS || "plan_mock_business_mo")}
                                     disabled={loadingCheckout}
                                     className="w-full bg-gradient-to-r from-violet-600 to-indigo-600 text-white font-bold h-11 rounded-xl hover:opacity-90 shadow-lg shadow-violet-500/20"
                                 >
@@ -213,7 +232,7 @@ export default function SettingsPage() {
                         )}
                     </CardContent>
 
-                    {/* Stripe portal CTA for active subscribers */}
+                    {/* Razorpay portal CTA for active subscribers */}
                     {isAdmin && hasSubscription && (
                         <CardFooter className="bg-slate-50 border-t border-slate-100 p-4 flex-col items-start gap-2">
                             {portalError && <p className="text-sm text-red-600 font-medium">{portalError}</p>}
@@ -226,7 +245,7 @@ export default function SettingsPage() {
                                 {loadingPortal
                                     ? <Loader2 className="w-4 h-4 mr-2 animate-spin text-slate-500" />
                                     : <ExternalLink className="w-4 h-4 mr-2 text-slate-500" />}
-                                Manage via Stripe Customer Portal
+                                Manage via Razorpay Customer Portal
                             </Button>
                         </CardFooter>
                     )}

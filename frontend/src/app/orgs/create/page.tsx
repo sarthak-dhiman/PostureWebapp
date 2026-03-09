@@ -4,6 +4,7 @@ import { useState, useEffect } from "react"
 import { useSession } from "next-auth/react"
 import { useRouter } from "next/navigation"
 import { Building, Users, Shield, ArrowRight, Loader2, CheckCircle2, AlertTriangle } from "lucide-react"
+import { apiFetch } from "@/lib/api"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
@@ -44,7 +45,7 @@ export default function CreateOrgPage() {
 
         try {
             const baseUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
-            const res = await fetch(`${baseUrl}/api/v1/orgs/upgrade/`, {
+            const res = await apiFetch(`${baseUrl}/api/v1/orgs/upgrade/`, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',

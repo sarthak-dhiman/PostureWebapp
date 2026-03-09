@@ -1,13 +1,16 @@
+# syntax=docker/dockerfile:1.4
 FROM node:20-alpine
 
 WORKDIR /app
 
-# Copy package.json and package-lock.json (if available)
+# Copy package files first to leverage layer cache
 COPY package*.json ./
 
-RUN npm install
+# Use npm cache mount and prefer `npm ci` when lockfile exists
+RUN --mount=type=cache,target=/root/.npm \
+	sh -c "if [ -f package-lock.json ]; then npm ci; else npm install; fi"
 
-# Copy all files
+# Copy remaining sources
 COPY . .
 
 # Build the Next.js app

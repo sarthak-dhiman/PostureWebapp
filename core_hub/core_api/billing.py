@@ -1,24 +1,32 @@
-import stripe
+import razorpay
+import uuid
 from django.conf import settings
 from django.utils import timezone
 from django.utils.decorators import method_decorator
 from django.views.decorators.csrf import csrf_exempt
-from django.utils import timezone
 from rest_framework import status
 from rest_framework.permissions import IsAuthenticated, AllowAny
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from .models import CustomUser, Organization, GiftedSubscription
+from .models import CustomUser, Organization, GiftedSubscription, ProcessedWebhookEvent, BillingTransaction, Refund, Invoice
+from .utils.billing_logic import reset_organization_usage
+from .utils.email import send_billing_email
+from .utils.monitoring import send_system_alert
 
-stripe.api_key = settings.STRIPE_SECRET_KEY
+# Initialize Razorpay Client globally if keys exist
+razorpay_client = None
+if getattr(settings, 'RAZORPAY_KEY_ID', '') and getattr(settings, 'RAZORPAY_KEY_SECRET', ''):
+    razorpay_client = razorpay.Client(
+        auth=(settings.RAZORPAY_KEY_ID, settings.RAZORPAY_KEY_SECRET)
+    )
 
-
-class CreateCheckoutSessionView(APIView):
+class CreateSubscriptionView(APIView):
     """
     POST /api/v1/billing/checkout/
-    Generates a Stripe Checkout Session URL for the authenticated user's organization.
-    Expects a `price_id` in the request body.
+    Generates a Razorpay Subscription for the authenticated user's organization.
+    Expects a `plan_id` in the request body (Razorpay's equivalent of a price_id).
+    Returns a `subscription_id` to be used by the frontend checkout script.
     """
     permission_classes = [IsAuthenticated]
 
@@ -30,49 +38,49 @@ class CreateCheckoutSessionView(APIView):
                 status=status.HTTP_403_FORBIDDEN
             )
 
-        price_id = request.data.get('price_id')
-        if not price_id:
-            return Response({"detail": "price_id is required."}, status=status.HTTP_400_BAD_REQUEST)
+        plan_id = request.data.get('plan_id')
+        if not plan_id:
+            # Fallback for frontend code that might still send `price_id`
+            plan_id = request.data.get('price_id')
+            if not plan_id:
+                return Response({"detail": "plan_id is required."}, status=status.HTTP_400_BAD_REQUEST)
 
-        # FRONTEND_URL ideally comes from settings (.env), hardcoded for scaffold purposes
-        frontend_url = getattr(settings, 'FRONTEND_URL', 'http://localhost:3000')
-
-        # Scaffold/Development Fallback bypasses Stripe if using placeholder keys
-        if getattr(settings, 'STRIPE_SECRET_KEY', '').endswith('placeholder'):
-            user.organization.stripe_subscription_id = f"sub_mock_{price_id}"
+        # Scaffold/Development Fallback bypasses Razorpay if using placeholder keys
+        if not razorpay_client or getattr(settings, 'RAZORPAY_KEY_SECRET', '').endswith('placeholder'):
+            user.organization.razorpay_subscription_id = f"sub_mock_{plan_id}"
+            user.organization.current_period_end = timezone.now() + timezone.timedelta(days=30)
             user.organization.save()
             # Upgrade the user to ADMIN so they can access the enterprise dashboard
             if user.role != CustomUser.Role.ADMIN:
                 user.role = CustomUser.Role.ADMIN
                 user.save(update_fields=['role'])
-            return Response({'url': f'{frontend_url}/dashboard?session_id=mock_session_123'})
+            return Response({'subscription_id': f'sub_mock_{plan_id}'})
 
         try:
-            # Add 7-day free trial for SOLO users on their first subscription
-            subscription_data = {}
-            if user.role == CustomUser.Role.SOLO:
-                subscription_data['trial_period_days'] = 7
-
-            checkout_session = stripe.checkout.Session.create(
-                payment_method_types=['card'],
-                line_items=[
-                    {
-                        'price': price_id,
-                        'quantity': user.organization.max_seats,
-                    },
-                ],
-                mode='subscription',
-                subscription_data=subscription_data,
-                success_url=f'{frontend_url}/dashboard?session_id={{CHECKOUT_SESSION_ID}}',
-                cancel_url=f'{frontend_url}/pricing',
-                # Store the organization ID in metadata so the webhook knows who paid
-                client_reference_id=str(user.organization.id),
-                metadata={
+            # Razorpay requires total_count (number of billing cycles). We'll set it high for "ongoing"
+            subscription_data = {
+                "plan_id": plan_id,
+                "total_count": 120, 
+                "quantity": user.organization.max_seats,
+                "customer_notify": 1,
+                "notes": {
                     "organization_id": str(user.organization.id)
                 }
-            )
-            return Response({'url': checkout_session.url})
-        except stripe.error.StripeError as e:
+            }
+            
+            # Add 7-day free trial for SOLO users on their first subscription
+            if user.role == CustomUser.Role.SOLO:
+                # Razorpay expects timestamp for start_at
+                from datetime import timedelta
+                import time
+                start_time = int(time.time() + timedelta(days=7).total_seconds())
+                subscription_data['start_at'] = start_time
+                
+            subscription = razorpay_client.subscription.create(subscription_data)
+            
+            return Response({'subscription_id': subscription['id']})
+            
+        except razorpay.errors.BadRequestError as e:
             return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
         except Exception as e:
             return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
@@ -81,8 +89,9 @@ class CreateCheckoutSessionView(APIView):
 class GiftCheckoutSessionView(APIView):
     """
     POST /api/v1/billing/gift/checkout/
-    Generates a Stripe Checkout Session URL for gifting a subscription.
-    Expects `price_id` and `recipient_email` in the request body.
+    Generates a Razorpay Order for gifting a subscription.
+    Unlike recurring subscriptions, gifts are one-off purchases (Orders).
+    Expects `plan_id` and `recipient_email` in the request body.
     """
     permission_classes = [IsAuthenticated]
 
@@ -94,54 +103,58 @@ class GiftCheckoutSessionView(APIView):
                 status=status.HTTP_403_FORBIDDEN
             )
 
-        price_id = request.data.get('price_id')
+        plan_id = request.data.get('plan_id')
+        if not plan_id:
+            plan_id = request.data.get('price_id')
+            
         recipient_email = request.data.get('recipient_email')
         
-        if not price_id or not recipient_email:
-            return Response({"detail": "price_id and recipient_email are required."}, status=status.HTTP_400_BAD_REQUEST)
+        if not plan_id or not recipient_email:
+            return Response({"detail": "plan_id and recipient_email are required."}, status=status.HTTP_400_BAD_REQUEST)
 
-        frontend_url = getattr(settings, 'FRONTEND_URL', 'http://localhost:3000')
-
-        # Scaffold/Development Fallback bypasses Stripe if using placeholder keys
-        if getattr(settings, 'STRIPE_SECRET_KEY', '').endswith('placeholder'):
-            from .models import GiftedSubscription
+        # We must look up the cost of the plan to create an Order.
+        # Given we only have the plan ID here, we either fetch it from Razorpay
+        # or have the frontend send the amount. We will fetch the plan.
+        
+        if not razorpay_client or getattr(settings, 'RAZORPAY_KEY_SECRET', '').endswith('placeholder'):
             import uuid
             GiftedSubscription.objects.create(
                 buyer=user,
                 recipient_email=recipient_email,
-                stripe_checkout_session_id=f"cs_test_{uuid.uuid4().hex[:16]}",
-                stripe_price_id=price_id,
+                razorpay_order_id=f"order_test_{uuid.uuid4().hex[:16]}",
+                plan_id=plan_id,
             )
-            return Response({'url': f'{frontend_url}/pricing?gift_success=true'})
+            return Response({'order_id': f"order_test_mock"})
 
         try:
-            checkout_session = stripe.checkout.Session.create(
-                payment_method_types=['card'],
-                line_items=[
-                    {
-                        'price': price_id,
-                        'quantity': 1,
-                    },
-                ],
-                mode='subscription',
-                success_url=f'{frontend_url}/pricing?gift_success=true',
-                cancel_url=f'{frontend_url}/pricing',
-                metadata={
+            # 1. Fetch Plan to get the amount
+            plan = razorpay_client.plan.fetch(plan_id)
+            amount = plan['item']['amount']
+            currency = plan['item']['currency']
+            
+            # 2. Create an Order
+            order = razorpay_client.order.create({
+                "amount": amount,
+                "currency": currency,
+                "receipt": f"gift_{user.id}",
+                "notes": {
                     "is_gift": "true",
                     "buyer_id": str(user.id),
                     "recipient_email": recipient_email,
-                    "plan_id": price_id
+                    "plan_id": plan_id
                 }
-            )
-            return Response({'url': checkout_session.url})
+            })
+            
+            return Response({'order_id': order['id']})
+            
         except Exception as e:
             return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
 class CustomerPortalView(APIView):
     """
-    POST /api/v1/billing/portal/
-    Generates a Stripe Customer Portal URL for an authorized user to manage their subscription.
+    POST /api/v1/billing/customer-portal/
+    Returns the Razorpay Subscription Short URL, allowing the user to update cards/cancel.
     """
     permission_classes = [IsAuthenticated]
 
@@ -151,67 +164,496 @@ class CustomerPortalView(APIView):
             return Response({"detail": "No organization associated."}, status=status.HTTP_403_FORBIDDEN)
 
         org = user.organization
-        # We need the Stripe Customer ID. In a full implementation, you'd save stripe_customer_id
-        # on the Organization model when the checkout completes. For now, we simulate this.
-        # But wait, we can retrieve the subscription to find the customer ID.
-        if not org.stripe_subscription_id:
+        if not org.razorpay_subscription_id:
             return Response(
                 {"detail": "Organization does not have an active subscription."},
                 status=status.HTTP_400_BAD_REQUEST
             )
 
-        try:
-            subscription = stripe.Subscription.retrieve(org.stripe_subscription_id)
-            customer_id = subscription.customer
+        if not razorpay_client:
+             return Response({"detail": "Razorpay client not configured."}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
-            frontend_url = getattr(settings, 'FRONTEND_URL', 'http://localhost:3000')
-            portal_session = stripe.billing_portal.Session.create(
-                customer=customer_id,
-                return_url=f'{frontend_url}/settings',
-            )
-            return Response({'url': portal_session.url})
+        try:
+            subscription = razorpay_client.subscription.fetch(org.razorpay_subscription_id)
+            # Razorpay subscriptions have a 'short_url' for the customer portal 
+            short_url = subscription.get('short_url')
+            
+            if not short_url:
+                raise ValueError("Could not resolve portal URL from subscription.")
+                
+            return Response({'url': short_url})
         except Exception as e:
+            # Fallback for mock subscriptions
+            if org.razorpay_subscription_id and org.razorpay_subscription_id.startswith('sub_mock_'):
+                return Response({'url': 'https://razorpay.com/docs/billing/subscriptions/portal/', 'is_mock': True})
             return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+class CreateRefundView(APIView):
+    """
+    POST /api/v1/billing/refund/
+    Initiates a refund for a specific payment.
+    Admin-only access.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        user = request.user
+        if not isinstance(user, CustomUser) or user.role != CustomUser.Role.ADMIN:
+             return Response({"detail": "Admin access required."}, status=403)
+
+        payment_id = request.data.get('payment_id')
+        amount = request.data.get('amount') # in major units (e.g. 500.00)
+        reason = request.data.get('reason', 'Customer requested refund')
+
+        if not payment_id or not amount:
+            return Response({"detail": "payment_id and amount are required."}, status=400)
+
+        org = user.organization
+        if not org:
+            return Response({"detail": "No organization."}, status=403)
+
+        # Mock logic
+        if not razorpay_client or getattr(settings, 'RAZORPAY_KEY_SECRET', '').endswith('placeholder'):
+            refund = Refund.objects.create(
+                organization=org,
+                payment_id=payment_id,
+                refund_id=f"rfnd_mock_{uuid.uuid4().hex[:12]}",
+                amount=amount,
+                status=Refund.StatusTypes.PENDING,
+                reason=reason
+            )
+            return Response({
+                "status": "Refund initiated (Mock)",
+                "refund_id": refund.refund_id
+            })
+
+        try:
+            # Convert amount to paise
+            amount_paise = int(float(amount) * 100)
+            
+            refund_data = {
+                "amount": amount_paise,
+                "speed": "normal",
+                "notes": {
+                    "organization_id": str(org.id),
+                    "reason": reason
+                }
+            }
+            
+            rzp_refund = razorpay_client.payment.refund(payment_id, refund_data)
+            
+            refund = Refund.objects.create(
+                organization=org,
+                payment_id=payment_id,
+                refund_id=rzp_refund['id'],
+                amount=amount,
+                status=Refund.StatusTypes.PENDING,
+                reason=reason
+            )
+
+            # Log Transaction
+            BillingTransaction.objects.create(
+                organization=org,
+                transaction_id=rzp_refund['id'],
+                event_type="refund.initiated",
+                amount=-float(amount),
+                payload=rzp_refund
+            )
+
+            return Response({
+                "status": "processed",
+                "refund_id": rzp_refund['id']
+            })
+
+        except Exception as e:
+            return Response({"error": str(e)}, status=500)
+
+class MockBillingActionView(APIView):
+    """
+    POST /api/v1/billing/mock-success/
+    Simulates a Razorpay Webhook for development environments.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        user = request.user
+        if not isinstance(user, CustomUser) or not user.organization:
+            return Response({"detail": "No organization."}, status=403)
+
+        subscription_id = request.data.get('subscription_id')
+        order_id = request.data.get('order_id')
+        action = request.data.get('action', 'success') # success, failure, cancel
+        org = user.organization
+
+        if subscription_id:
+            if action == 'success':
+                org.razorpay_subscription_id = subscription_id
+                org.is_active = True
+                org.current_period_end = timezone.now() + timezone.timedelta(days=30)
+                org.save()
+                reset_organization_usage(org)
+                
+                # Elevate to Admin if solo
+                if user.role != CustomUser.Role.ADMIN:
+                    user.role = CustomUser.Role.ADMIN
+                    user.save(update_fields=['role'])
+                
+                # Send Mock Email
+                send_billing_email(user, 'payment_success', {
+                    'plan_name': 'Premium (Mock)',
+                    'org_name': org.name,
+                    'cycle_end': org.current_period_end.strftime('%B %d, %Y')
+                })
+
+                # Create Mock Invoice
+                mock_inv_id = f"inv_mock_{uuid.uuid4().hex[:8]}"
+                Invoice.objects.create(
+                    organization=org,
+                    razorpay_invoice_id=mock_inv_id,
+                    amount=500.00,
+                    status=Invoice.Status.PAID,
+                    invoice_pdf_url=f"https://razorpay.com/mock-invoice/{mock_inv_id}",
+                    paid_at=timezone.now()
+                )
+                    
+                return Response({"status": "Subscription activated (Mock)"})
+            
+            elif action == 'failure':
+                send_billing_email(user, 'payment_failure', {
+                    'org_name': org.name
+                })
+                print(f"[BILLING MOCK] Simulating payment failure for {subscription_id}")
+                return Response({"status": "Payment failure simulated (Mock)"})
+            
+            elif action == 'cancel':
+                org.is_active = False
+                org.save(update_fields=['is_active'])
+                
+                send_billing_email(user, 'subscription_cancelled', {
+                    'org_name': org.name
+                })
+                
+                print(f"[BILLING MOCK] Simulating subscription cancellation for {subscription_id}")
+                return Response({"status": "Subscription cancelled (Mock)"})
+
+            elif action == 'refund':
+                send_billing_email(user, 'refund_processed', {
+                    'amount': '500.00',
+                    'currency': 'INR'
+                })
+                print(f"[BILLING MOCK] Simulating refund for {subscription_id}")
+                return Response({"status": "Refund processed (Mock)"})
+
+            elif action == 'update':
+                org.max_seats += 5
+                org.save(update_fields=['max_seats'])
+                
+                send_billing_email(user, 'plan_updated', {
+                    'org_name': org.name,
+                    'plan_details': 'Enterprise (Mock)',
+                    'max_seats': org.max_seats
+                })
+                print(f"[BILLING MOCK] Simulating plan update for {subscription_id}")
+                return Response({"status": "Plan update simulated (Mock)"})
+
+        if order_id:
+            if action == 'success':
+                # Find the gift
+                gift = GiftedSubscription.objects.filter(razorpay_order_id=order_id).first()
+                if gift:
+                    gift.status = GiftedSubscription.StatusTypes.ACCEPTED
+                    gift.save()
+                    return Response({"status": "Gift activated (Mock)"})
+            else:
+                print(f"[BILLING MOCK] Simulating gift failure/cancel for {order_id}")
+                return Response({"status": "Gift action simulated (Mock)"})
+
+        return Response({"detail": "Nothing to do."}, status=400)
 
 
 @method_decorator(csrf_exempt, name='dispatch')
-class StripeWebhookView(APIView):
+class RazorpayWebhookView(APIView):
     """
     POST /api/v1/billing/webhook/
-    Receives server-to-server events from Stripe. Bypasses authentication (AllowAny)
-    and validates the Stripe cryptographical signature instead.
+    Receives server-to-server events from Razorpay.
+    Validates the cryptographic signature.
     """
     permission_classes = [AllowAny]
 
     def post(self, request):
-        payload = request.body
-        sig_header = request.META.get('HTTP_STRIPE_SIGNATURE')
-        endpoint_secret = settings.STRIPE_WEBHOOK_SECRET
+        payload = request.body.decode('utf-8')
+        signature = request.META.get('HTTP_X_RAZORPAY_SIGNATURE')
+        secret = getattr(settings, 'RAZORPAY_WEBHOOK_SECRET', '')
+
+        if not signature or not secret:
+            return Response(status=status.HTTP_400_BAD_REQUEST)
 
         try:
-            event = stripe.Webhook.construct_event(
-                payload, sig_header, endpoint_secret
+            # Verify signature
+            razorpay_client.utility.verify_webhook_signature(payload, signature, secret)
+        except razorpay.errors.SignatureVerificationError as e:
+            send_system_alert(
+                "Webhook Signature Verification Failed",
+                f"Signature: {signature}\nError: {str(e)}",
+                severity="HIGH"
             )
-        except ValueError as e:
-            # Invalid payload
-            return Response(status=status.HTTP_400_BAD_REQUEST)
-        except stripe.error.SignatureVerificationError as e:
-            # Invalid signature
-            return Response(status=status.HTTP_400_BAD_REQUEST)
+            return Response({"error": "Invalid signature"}, status=status.HTTP_400_BAD_REQUEST)
+        except Exception as e:
+            send_system_alert(
+                "Webhook Verification Unexpected Error",
+                f"Error: {str(e)}",
+                severity="CRITICAL"
+            )
+            return Response({"error": "Verification error"}, status=status.HTTP_400_BAD_REQUEST)
 
-        # Handle the event
-        if event['type'] == 'checkout.session.completed':
-            session = event['data']['object']
-            
-            is_gift = session.get('metadata', {}).get('is_gift') == 'true'
-            
-            if is_gift:
-                buyer_id = session.get('metadata', {}).get('buyer_id')
-                recipient_email = session.get('metadata', {}).get('recipient_email')
-                plan_id = session.get('metadata', {}).get('plan_id')
+        import json
+        event = json.loads(payload)
+        event_id = event.get('account_id') # Razorpay actually sends event_id as 'account_id' sometimes, but the standard is 'id'
+        event_id = event.get('id')
+        
+        if not event_id:
+             return Response(status=status.HTTP_400_BAD_REQUEST)
+
+        # Idempotency Check
+        if ProcessedWebhookEvent.objects.filter(event_id=event_id).exists():
+            print(f"[BILLING] Duplicate webhook detected: {event_id}. Skipping.")
+            return Response({"status": "already_processed"}, status=status.HTTP_200_OK)
+
+        # Mark as processed immediately to prevent race conditions (simple approach)
+        ProcessedWebhookEvent.objects.create(event_id=event_id)
+
+        event_type = event.get('event')
+
+        # Parse Entities
+        if event_type == 'subscription.authenticated' or event_type == 'subscription.activated':
+            sub = event['payload']['subscription']['entity']
+            notes = sub.get('notes', {})
+            org_id = notes.get('organization_id')
+            subscription_id = sub.get('id')
+
+            if org_id and subscription_id:
+                try:
+                    org = Organization.objects.get(id=org_id)
+                    org.razorpay_subscription_id = subscription_id
+                    org.is_active = True
+                    
+                    # Sync billing period
+                    current_end = sub.get('current_end')
+                    if current_end:
+                        org.current_period_end = timezone.datetime.fromtimestamp(current_end, tz=timezone.utc)
+                    
+                    org.save(update_fields=['razorpay_subscription_id', 'is_active', 'current_period_end'])
+                    
+                    # Log Transaction
+                    BillingTransaction.objects.create(
+                        organization=org,
+                        transaction_id=subscription_id,
+                        event_type=event_type,
+                        payload=event
+                    )
+                    
+                    # Reset usage for the new billing cycle
+                    reset_organization_usage(org)
+                    
+                    # Send Email (to the first admin or the creating user)
+                    admin_user = org.users.filter(role=CustomUser.Role.ADMIN).first() or org.users.first()
+                    if admin_user:
+                        send_billing_email(admin_user, 'payment_success', {
+                            'plan_name': sub.get('plan_id', 'Premium'),
+                            'org_name': org.name,
+                            'cycle_end': org.current_period_end.strftime('%B %d, %Y')
+                        })
+                except Organization.DoesNotExist:
+                    pass
+
+        elif event_type in ['subscription.cancelled', 'subscription.completed']:
+            sub = event['payload']['subscription']['entity']
+            subscription_id = sub.get('id')
+            try:
+                org = Organization.objects.get(razorpay_subscription_id=subscription_id)
+                org.is_active = False
+                org.save(update_fields=['is_active'])
                 
-                payment_intent_id = session.get('payment_intent')
-                # For subscriptions, the first payment is usually on the invoice, but we can store the session
+                # Log Transaction
+                BillingTransaction.objects.create(
+                    organization=org,
+                    transaction_id=subscription_id,
+                    event_type=event_type,
+                    payload=event
+                )
+                
+                # Send Email
+                admin_user = org.users.filter(role=CustomUser.Role.ADMIN).first() or org.users.first()
+                if admin_user:
+                    send_billing_email(admin_user, 'subscription_cancelled', {
+                        'org_name': org.name
+                    })
+                
+                print(f"[BILLING] Subscription {subscription_id} cancelled/completed. Org {org.id} deactivated.")
+            except Organization.DoesNotExist:
+                pass
+
+        elif event_type in ['subscription.pending', 'subscription.halted']:
+            sub = event['payload']['subscription']['entity']
+            subscription_id = sub.get('id')
+            try:
+                org = Organization.objects.get(razorpay_subscription_id=subscription_id)
+                org.is_active = False
+                org.save(update_fields=['is_active'])
+                
+                # Log Transaction
+                BillingTransaction.objects.create(
+                    organization=org,
+                    transaction_id=subscription_id,
+                    event_type=event_type,
+                    payload=event
+                )
+                
+                # Send Email (failure alert)
+                admin_user = org.users.filter(role=CustomUser.Role.ADMIN).first() or org.users.first()
+                if admin_user:
+                    send_billing_email(admin_user, 'payment_failure', {
+                        'org_name': org.name
+                    })
+                
+                print(f"[BILLING] Subscription {subscription_id} entered status: {event_type}. Org {org.id} deactivated.")
+            except Organization.DoesNotExist:
+                pass
+
+        elif event_type == 'subscription.updated':
+            sub = event['payload']['subscription']['entity']
+            subscription_id = sub.get('id')
+            try:
+                org = Organization.objects.get(razorpay_subscription_id=subscription_id)
+                
+                # Check for seat changes in notes/metadata if we pass them
+                # Razorpay subscriptions can have notes
+                notes = sub.get('notes', {})
+                new_seats = notes.get('total_seats') or notes.get('max_seats')
+                
+                if new_seats:
+                    try:
+                        org.max_seats = int(new_seats)
+                    except (ValueError, TypeError):
+                        pass
+
+                # Sync status
+                status_val = sub.get('status')
+                if status_val == 'active':
+                    org.is_active = True
+                
+                # Sync billing period
+                current_end = sub.get('current_end')
+                if current_end:
+                    org.current_period_end = timezone.datetime.fromtimestamp(current_end, tz=timezone.utc)
+                
+                org.save(update_fields=['is_active', 'max_seats', 'current_period_end'])
+                
+                # Log Transaction
+                BillingTransaction.objects.create(
+                    organization=org,
+                    transaction_id=subscription_id,
+                    event_type=event_type,
+                    payload=event
+                )
+                
+                # Send Email
+                admin_user = org.users.filter(role=CustomUser.Role.ADMIN).first() or org.users.first()
+                if admin_user:
+                    send_billing_email(admin_user, 'plan_updated', {
+                        'org_name': org.name,
+                        'plan_details': sub.get('plan_id', 'Updated Plan'),
+                        'max_seats': org.max_seats
+                    })
+                
+                print(f"[BILLING] Subscription {subscription_id} updated. Org {org.id} synced.")
+            except Organization.DoesNotExist:
+                pass
+
+        elif event_type == 'subscription.charged':
+            # Recurring payment successful
+            sub = event['payload']['subscription']['entity']
+            subscription_id = sub.get('id')
+            try:
+                org = Organization.objects.get(razorpay_subscription_id=subscription_id)
+                org.is_active = True
+                
+                # Sync billing period
+                current_end = sub.get('current_end')
+                if current_end:
+                    org.current_period_end = timezone.datetime.fromtimestamp(current_end, tz=timezone.utc)
+                
+                org.save(update_fields=['is_active', 'max_seats', 'current_period_end'])
+                
+                # Log Transaction
+                BillingTransaction.objects.create(
+                    organization=org,
+                    transaction_id=subscription_id,
+                    event_type=event_type,
+                    payload=event
+                )
+                
+                # Send Email
+                admin_user = org.users.filter(role=CustomUser.Role.ADMIN).first() or org.users.first()
+                if admin_user:
+                    send_billing_email(admin_user, 'payment_success', {
+                        'plan_name': sub.get('plan_id', 'Premium'),
+                        'org_name': org.name,
+                        'cycle_end': org.current_period_end.strftime('%B %d, %Y')
+                    })
+                
+                # Reset usage for the new billing cycle
+                reset_organization_usage(org)
+                print(f"[BILLING] Subscription {subscription_id} charged successfully. Quota reset for Org {org.id}.")
+            except Organization.DoesNotExist:
+                pass
+
+        elif event_type == 'subscription.updated':
+            sub = event['payload']['subscription']['entity']
+            subscription_id = sub.get('id')
+            try:
+                org = Organization.objects.get(razorpay_subscription_id=subscription_id)
+                # Sync quantity 
+                quantity = sub.get('quantity')
+                if quantity is not None and quantity != org.max_seats:
+                    org.max_seats = quantity
+                    org.save(update_fields=['max_seats'])
+                
+                # Check status
+                status_val = sub.get('status')
+                is_active = status_val in ['active', 'authenticated']
+                
+                # Check for cycle reset (current_end changed)
+                new_end_ts = sub.get('current_end')
+                if new_end_ts:
+                    new_end = timezone.datetime.fromtimestamp(new_end_ts, tz=timezone.utc)
+                    # If the end date has moved forward by more than 1 day, it's likely a renewal
+                    if org.current_period_end and (new_end - org.current_period_end).days > 1:
+                        reset_organization_usage(org)
+                    org.current_period_end = new_end
+
+                if org.is_active != is_active:
+                    org.is_active = is_active
+                    org.save(update_fields=['is_active', 'max_seats', 'current_period_end'])
+                else:
+                    org.save(update_fields=['max_seats', 'current_period_end'])
+            except Organization.DoesNotExist:
+                pass
+                
+        elif event_type == 'order.paid':
+            order = event['payload']['order']['entity']
+            notes = order.get('notes', {})
+            
+            is_gift = notes.get('is_gift') == 'true'
+            if is_gift:
+                buyer_id = notes.get('buyer_id')
+                recipient_email = notes.get('recipient_email')
+                plan_id = notes.get('plan_id')
+                # In order.paid, the payment entity is generally also provided inside the payload
+                # but we can just use the order ID as the primary tracking key
+                payment_id = ""
+                if 'payment' in event['payload']:
+                    payment_id = event['payload']['payment']['entity'].get('id', '')
                 
                 if buyer_id and recipient_email:
                     try:
@@ -219,60 +661,173 @@ class StripeWebhookView(APIView):
                         GiftedSubscription.objects.create(
                             buyer=buyer,
                             recipient_email=recipient_email,
-                            stripe_checkout_session_id=session.get('id'),
-                            stripe_payment_intent_id=payment_intent_id,
-                            plan_id=plan_id
+                            razorpay_order_id=order.get('id'),
+                            razorpay_payment_id=payment_id,
+                            plan_id=plan_id,
+                            status=GiftedSubscription.StatusTypes.PENDING # Defaults to pending
                         )
-                        # We would also trigger an email here in a real production system
+                        
+                        # Log Transaction
+                        BillingTransaction.objects.create(
+                            transaction_id=order.get('id'),
+                            event_type=event_type,
+                            payload=event
+                        )
                     except CustomUser.DoesNotExist:
                         pass
-            else:
-                org_id = session.get('client_reference_id')
-                subscription_id = session.get('subscription')
 
-                if org_id and subscription_id:
-                    try:
-                        org = Organization.objects.get(id=org_id)
-                        org.stripe_subscription_id = subscription_id
-                        org.is_active = True
-                        org.save(update_fields=['stripe_subscription_id', 'is_active'])
-                    except Organization.DoesNotExist:
-                        pass
+        elif event_type == 'payment.failed':
+            payment = event['payload']['payment']['entity']
+            payment_id = payment.get('id')
+            error_description = payment.get('error_description')
+            print(f"[BILLING] Payment failed: {payment_id}. Error: {error_description}")
+            
+            # Log Transaction
+            BillingTransaction.objects.create(
+                transaction_id=payment_id,
+                event_type=event_type,
+                status="failed",
+                payload=event
+            )
+            # In a real app, we would send an email to the user here.
 
-        elif event['type'] == 'customer.subscription.deleted':
-            subscription = event['data']['object']
-            subscription_id = subscription.get('id')
-            try:
-                # Find the org with this subscription and disable it
-                org = Organization.objects.get(stripe_subscription_id=subscription_id)
-                org.is_active = False
-                org.save(update_fields=['is_active'])
-            except Organization.DoesNotExist:
-                pass
-
-        elif event['type'] == 'customer.subscription.updated':
-            subscription = event['data']['object']
-            subscription_id = subscription.get('id')
-            try:
-                org = Organization.objects.get(stripe_subscription_id=subscription_id)
-                
-                # Sync quantity changes 
-                items = subscription.get('items', {}).get('data', [])
-                if items:
-                    quantity = items[0].get('quantity')
-                    if quantity is not None and quantity != org.max_seats:
-                        org.max_seats = quantity
-                        org.save(update_fields=['max_seats'])
-                
-                # Check cancellation or pause status
-                status_val = subscription.get('status')
-                is_active = status_val in ['active', 'trialing']
-                if org.is_active != is_active:
-                    org.is_active = is_active
+        elif event_type == 'invoice.paid':
+            invoice = event['payload']['invoice']['entity']
+            subscription_id = invoice.get('subscription_id')
+            if subscription_id:
+                try:
+                    org = Organization.objects.get(razorpay_subscription_id=subscription_id)
+                    org.is_active = True
                     org.save(update_fields=['is_active'])
-            except Organization.DoesNotExist:
+                    
+                    # Log Transaction
+                    BillingTransaction.objects.create(
+                        organization=org,
+                        transaction_id=subscription_id,
+                        event_type=event_type,
+                        payload=event
+                    )
+                    
+                    print(f"[BILLING] Invoice paid for subscription {subscription_id}. Org {org.id} is active.")
+                except Organization.DoesNotExist:
+                    pass
+
+        elif event_type == 'refund.processed':
+            refund_entity = event['payload']['refund']['entity']
+            refund_id = refund_entity.get('id')
+            payment_id = refund_entity.get('payment_id')
+            
+            try:
+                refund = Refund.objects.get(refund_id=refund_id)
+                refund.status = Refund.StatusTypes.PROCESSED
+                refund.save()
+                
+                # Log Transaction
+                BillingTransaction.objects.create(
+                    organization=refund.organization,
+                    transaction_id=refund_id,
+                    event_type=event_type,
+                    amount=-float(refund.amount),
+                    payload=event
+                )
+                print(f"[BILLING] Refund {refund_id} processed successfully.")
+                
+                # Send Email
+                admin_user = refund.organization.users.filter(role=CustomUser.Role.ADMIN).first() or refund.organization.users.first()
+                if admin_user:
+                    send_billing_email(admin_user, 'refund_processed', {
+                        'amount': refund.amount,
+                        'currency': 'INR'
+                    })
+            except Refund.DoesNotExist:
+                # If we don't have the record, it might have been initiated from dashboard
                 pass
-        
-        # Other events can be handled here (e.g. invoice.payment_failed)
+
+        elif event_type == 'refund.failed':
+            refund_entity = event['payload']['refund']['entity']
+            refund_id = refund_entity.get('id')
+            
+            try:
+                refund = Refund.objects.get(refund_id=refund_id)
+                refund.status = Refund.StatusTypes.FAILED
+                refund.save()
+                
+                # Log Transaction
+                BillingTransaction.objects.create(
+                    organization=refund.organization,
+                    transaction_id=refund_id,
+                    event_type=event_type,
+                    status="failed",
+                    payload=event
+                )
+                print(f"[BILLING] Refund {refund_id} failed.")
+            except Refund.DoesNotExist:
+                pass
+
+        elif event_type in ['invoice.paid', 'invoice.issued', 'invoice.failed']:
+            # Handle Razorpay Invoice events
+            invoice_data = event['payload']['invoice']['entity']
+            invoice_id = invoice_data.get('id')
+            subscription_id = invoice_data.get('subscription_id')
+            
+            try:
+                if subscription_id:
+                    org = Organization.objects.get(razorpay_subscription_id=subscription_id)
+                else:
+                    # Try notes or associated order
+                    notes = invoice_data.get('notes', {})
+                    org_id = notes.get('organization_id')
+                    if org_id:
+                        org = Organization.objects.get(id=org_id)
+                    else:
+                        raise Organization.DoesNotExist()
+
+                invoice_status = 'paid' if event_type == 'invoice.paid' else 'issued' if event_type == 'invoice.issued' else 'failed'
+                
+                invoice, created = Invoice.objects.update_or_create(
+                    razorpay_invoice_id=invoice_id,
+                    defaults={
+                        'organization': org,
+                        'razorpay_payment_id': invoice_data.get('payment_id'),
+                        'amount': invoice_data.get('amount') / 100 if invoice_data.get('amount') else 0,
+                        'currency': invoice_data.get('currency', 'INR'),
+                        'status': invoice_status,
+                        'invoice_pdf_url': invoice_data.get('short_url'),
+                        'issued_at': timezone.datetime.fromtimestamp(invoice_data.get('issued_at'), tz=timezone.utc) if invoice_data.get('issued_at') else timezone.now(),
+                        'paid_at': timezone.now() if event_type == 'invoice.paid' else None
+                    }
+                )
+                print(f"[BILLING] Invoice {invoice_id} synced for Org {org.id}. Status: {invoice.status}")
+            except Organization.DoesNotExist:
+                print(f"[BILLING WARNING] Received invoice {invoice_id} for unknown organization.")
+                pass
 
         return Response(status=status.HTTP_200_OK)
+
+
+class InvoiceListView(APIView):
+    """
+    GET /api/v1/billing/invoices/
+    Returns the billing history (list of invoices) for the authenticated user's organization.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        user = request.user
+        if not user.organization:
+            return Response([])
+
+        invoices = Invoice.objects.filter(organization=user.organization)
+        data = []
+        for inv in invoices:
+            data.append({
+                "id": str(inv.id),
+                "invoice_id": inv.razorpay_invoice_id,
+                "amount": float(inv.amount),
+                "currency": inv.currency,
+                "status": inv.status,
+                "pdf_url": inv.invoice_pdf_url,
+                "issued_at": inv.issued_at,
+                "paid_at": inv.paid_at
+            })
+        return Response(data)

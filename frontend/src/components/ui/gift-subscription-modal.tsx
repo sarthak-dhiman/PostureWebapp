@@ -6,21 +6,25 @@ import { useRouter } from "next/navigation"
 import { Loader2, X, Gift } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { apiFetch } from "@/lib/api"
+import { MockPaymentModal } from "./mock-payment-modal"
 
 interface GiftSubscriptionModalProps {
     isOpen: boolean
     onClose: () => void
-    priceId: string
+    planId: string
     planName: string
 }
 
-export function GiftSubscriptionModal({ isOpen, onClose, priceId, planName }: GiftSubscriptionModalProps) {
+export function GiftSubscriptionModal({ isOpen, onClose, planId, planName }: GiftSubscriptionModalProps) {
     const { data: session, status } = useSession()
     const router = useRouter()
 
     const [recipientEmail, setRecipientEmail] = useState("")
     const [isLoading, setIsLoading] = useState(false)
     const [error, setError] = useState<string | null>(null)
+    const [razorpayScriptLoaded, setRazorpayScriptLoaded] = useState(false)
+    const [mockModal, setMockModal] = useState<{ isOpen: boolean, orderId?: string }>({ isOpen: false })
 
     // Handle Escape key
     useEffect(() => {
@@ -30,6 +34,31 @@ export function GiftSubscriptionModal({ isOpen, onClose, priceId, planName }: Gi
         window.addEventListener('keydown', handleKeyDown)
         return () => window.removeEventListener('keydown', handleKeyDown)
     }, [isOpen, onClose])
+
+    // Dynamically inject the Razorpay checkout script
+    useEffect(() => {
+        if (!isOpen) return;
+
+        const loadRazorpay = () => {
+            if (document.getElementById("razorpay-checkout-gift-js")) {
+                setRazorpayScriptLoaded(true)
+                return
+            }
+
+            const script = document.createElement("script")
+            script.id = "razorpay-checkout-gift-js"
+            script.src = "https://checkout.razorpay.com/v1/checkout.js"
+            script.async = true
+            script.onload = () => setRazorpayScriptLoaded(true)
+            script.onerror = () => {
+                console.error("Failed to load Razorpay script")
+                setError("Payment gateway failed to load. Please check your connection.")
+            }
+            document.body.appendChild(script)
+        }
+
+        loadRazorpay()
+    }, [isOpen])
 
     if (!isOpen) return null
 
@@ -48,18 +77,24 @@ export function GiftSubscriptionModal({ isOpen, onClose, priceId, planName }: Gi
             return
         }
 
+        if (!razorpayScriptLoaded || !(window as any).Razorpay) {
+            setError("Payment gateway is still loading. Please try again in a moment.")
+            return
+        }
+
         setIsLoading(true)
         setError(null)
 
         try {
-            const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"}/api/v1/billing/gift/checkout/`, {
+            // Step 1: Tell the backend to create a Razorpay Order
+            const res = await apiFetch(`${process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"}/api/v1/billing/gift/checkout/`, {
                 method: "POST",
                 headers: {
                     "Content-Type": "application/json",
-                    Authorization: `Bearer ${(session as any)?.user?.accessToken || (session as any)?.accessToken}`,
+                    Authorization: `Bearer ${(session?.user as any)?.accessToken || (session as any)?.accessToken}`,
                 },
                 body: JSON.stringify({
-                    price_id: priceId,
+                    plan_id: planId,
                     recipient_email: recipientEmail
                 }),
             })
@@ -67,18 +102,52 @@ export function GiftSubscriptionModal({ isOpen, onClose, priceId, planName }: Gi
             const data = await res.json()
 
             if (!res.ok) {
-                throw new Error(data.detail || data.error || "Failed to create gift checkout session")
+                throw new Error(data.detail || data.error || "Failed to initialize gift order")
             }
 
-            if (data.url) {
-                // Redirect user to Stripe
-                window.location.href = data.url
-            } else {
-                throw new Error("No checkout URL returned from server")
+            if (!data.order_id) {
+                throw new Error("No active order generated.")
             }
+
+            // Bypass logic for unconfigured development environments
+            if (data.order_id.startsWith('order_test_mock')) {
+                setMockModal({ isOpen: true, orderId: data.order_id })
+                return
+            }
+
+            // Step 2: Initialize Razorpay Checkout inline modal for ONE-TIME ORDERS
+            const options = {
+                key: process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID || "",
+                order_id: data.order_id,
+                name: "Posture OS",
+                description: `Gift: ${planName}`,
+                image: "/icon.png",
+                handler: function (response: any) {
+                    onClose()
+                    router.push(`/pricing?gift_success=true`)
+                },
+                prefill: {
+                    name: session.user?.name || "",
+                    email: session.user?.email || "",
+                },
+                theme: {
+                    color: "#7c3aed",
+                },
+            }
+
+            const rzp = new (window as any).Razorpay(options)
+
+            rzp.on('payment.failed', function (response: any) {
+                console.error("Gift Payment failed", response.error)
+                setError(`Payment failed: ${response.error.description}`)
+            })
+
+            rzp.open()
+
         } catch (err: any) {
             console.error("Gift Subscription Error:", err)
             setError(err.message)
+        } finally {
             setIsLoading(false)
         }
     }
@@ -147,7 +216,7 @@ export function GiftSubscriptionModal({ isOpen, onClose, priceId, planName }: Gi
                             <Button
                                 type="submit"
                                 className="w-full bg-violet-600 hover:bg-violet-700 text-white font-bold shadow-md shadow-violet-500/20"
-                                disabled={isLoading}
+                                disabled={isLoading || !razorpayScriptLoaded}
                             >
                                 {isLoading ? (
                                     <>
@@ -162,6 +231,14 @@ export function GiftSubscriptionModal({ isOpen, onClose, priceId, planName }: Gi
                     </form>
                 </div>
             </div>
+
+            <MockPaymentModal
+                isOpen={mockModal.isOpen}
+                onClose={() => setMockModal({ isOpen: false })}
+                planName={planName}
+                orderId={mockModal.orderId}
+                token={(session?.user as any)?.accessToken || (session as any)?.accessToken}
+            />
         </div>
     )
 }

@@ -1,6 +1,7 @@
 import CredentialsProvider from "next-auth/providers/credentials";
 import GoogleProvider from "next-auth/providers/google";
 import type { AuthOptions, User } from "next-auth";
+import { apiFetch } from "./api";
 
 // Our custom User type mirroring Django's response
 interface DjangoUser extends User {
@@ -22,7 +23,8 @@ export const authOptions: AuthOptions = {
       name: "Credentials",
       credentials: {
         username: { label: "Username", type: "text" },
-        password: { label: "Password", type: "password" }
+        password: { label: "Password", type: "password" },
+        "cf-turnstile-response": { label: "Captcha", type: "text" }
       },
       async authorize(credentials) {
         console.log("AUTHORIZE START for", credentials?.username);
@@ -32,18 +34,30 @@ export const authOptions: AuthOptions = {
         }
 
         try {
-          const baseUrl = process.env.API_URL || process.env.NEXT_PUBLIC_API_URL
+          const baseUrl = process.env.API_URL || process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
           console.log("Using API_URL:", baseUrl);
-          const tokenRes = await fetch(`${baseUrl}/api/v1/auth/token/`, {
+
+          // Build the payload mapping credentials exactly to what DRF expects
+          const payload: any = {
+            username: credentials?.username,
+            password: credentials?.password,
+          }
+          if (credentials?.["cf-turnstile-response"]) {
+            payload["cf-turnstile-response"] = credentials["cf-turnstile-response"]
+          }
+
+          const tokenRes = await apiFetch(`${baseUrl}/api/v1/auth/token/`, {
             method: 'POST',
-            body: JSON.stringify(credentials),
+            body: JSON.stringify(payload),
             headers: { "Content-Type": "application/json" }
           });
 
-          console.log("Token response status:", tokenRes.status);
+          console.log("Token response status:", tokenRes.status, "url:", `${baseUrl}/api/v1/auth/token/`);
           if (!tokenRes.ok) {
             console.log("Token response NOT OK");
-            return null;
+            const errData = await tokenRes.json().catch(() => ({}));
+            // NextAuth catches this and sends the message string directly to res.error
+            throw new Error(errData.detail || "Invalid credentials");
           }
           const tokens = await tokenRes.json();
           console.log("Token generated successfully");
@@ -79,9 +93,9 @@ export const authOptions: AuthOptions = {
           console.log("Returning mapped NextAuth user:", JSON.stringify(user));
           return user;
 
-        } catch (e) {
+        } catch (e: any) {
           console.error("Auth error catch block:", e);
-          return null;
+          throw new Error(e.message || "Authentication failed");
         }
       }
     }),

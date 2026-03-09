@@ -6,9 +6,9 @@ from .models import CustomUser, Organization, PlatformLog, ServiceAccount
 
 @admin.register(Organization)
 class OrganizationAdmin(admin.ModelAdmin):
-    list_display = ['name', 'is_active', 'stripe_subscription_id', 'created_at']
+    list_display = ['name', 'is_active', 'razorpay_subscription_id', 'created_at']
     list_filter = ['is_active']
-    search_fields = ['name', 'stripe_subscription_id']
+    search_fields = ['name', 'razorpay_subscription_id']
     readonly_fields = ['id', 'created_at']
 
 

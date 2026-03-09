@@ -2,6 +2,7 @@ import uuid
 import hashlib
 import secrets
 
+from django.utils import timezone
 from django.contrib.auth.models import AbstractUser
 from django.db import models
 
@@ -18,7 +19,8 @@ class Organization(models.Model):
     invite_code = models.CharField(max_length=64, unique=True, default=uuid.uuid4, help_text="Code used by employees to join this organization.")
     invite_policy = models.CharField(max_length=25, choices=InvitePolicy.choices, default=InvitePolicy.OPEN_LINK)
     max_seats = models.IntegerField(default=5, help_text="Maximum number of users allowed in this organization.")
-    stripe_subscription_id = models.CharField(max_length=255, blank=True, null=True)
+    razorpay_subscription_id = models.CharField(max_length=255, blank=True, null=True)
+    current_period_end = models.DateTimeField(blank=True, null=True, help_text="End of the current billing cycle.")
     is_active = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
@@ -56,6 +58,20 @@ class CustomUser(AbstractUser):
         choices=Role.choices,
         default=Role.SOLO,
     )
+    is_email_verified = models.BooleanField(
+        default=False, 
+        help_text="Tracks whether the user has verified their email address via token."
+    )
+    phone_number = models.CharField(
+        max_length=32,
+        blank=True,
+        null=True,
+        help_text="Optional E.164 phone number for SMS verification."
+    )
+    is_phone_verified = models.BooleanField(
+        default=False,
+        help_text="Tracks whether the user's phone number has been verified."
+    )
     monitoring_seconds_used = models.PositiveIntegerField(
         default=0,
         help_text="Total seconds of posture monitoring used (free tier cap: 36000s / 10hrs)."
@@ -67,7 +83,7 @@ class CustomUser(AbstractUser):
         """Returns remaining free tier quota in seconds, or None if user has a paid plan."""
         if self.role == self.Role.SOLO:
             org = getattr(self, 'organization', None)
-            has_sub = org.has_subscription() if org and hasattr(org, 'has_subscription') else bool(getattr(org, 'stripe_subscription_id', None))
+            has_sub = org.has_subscription() if org and hasattr(org, 'has_subscription') else bool(getattr(org, 'razorpay_subscription_id', None))
             if not has_sub:
                 return max(0, self.FREE_TIER_QUOTA_SECONDS - self.monitoring_seconds_used)
         return None  # Unlimited for paid / org users
@@ -261,9 +277,9 @@ class GiftedSubscription(models.Model):
     buyer = models.ForeignKey(CustomUser, on_delete=models.CASCADE, related_name='gifts_sent')
     recipient_email = models.EmailField(db_index=True)
     
-    # We need both: checkout session to verify payment initially, payment_intent to issue the refund later
-    stripe_checkout_session_id = models.CharField(max_length=255, unique=True)
-    stripe_payment_intent_id = models.CharField(max_length=255, blank=True, null=True)
+    # We need both: order id to verify payment initially, payment_id to issue the refund later
+    razorpay_order_id = models.CharField(max_length=255, unique=True)
+    razorpay_payment_id = models.CharField(max_length=255, blank=True, null=True)
     
     plan_id = models.CharField(max_length=100)
     status = models.CharField(max_length=20, choices=StatusTypes.choices, default=StatusTypes.PENDING)
@@ -369,4 +385,244 @@ class CCTVTelemetry(models.Model):
 
     def __str__(self):
         return f"[{self.service_account.name}] {self.status} / {self.current_fps}fps @ {self.created_at}"
+
+
+class ProcessedWebhookEvent(models.Model):
+    """
+    Ensures idempotency for Razorpay webhooks.
+    We store the unique 'event_id' from the payload.
+    """
+    event_id = models.CharField(max_length=100, unique=True, db_index=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name = 'Processed Webhook Event'
+        verbose_name_plural = 'Processed Webhook Events'
+
+    def __str__(self):
+        return self.event_id
+
+
+class BillingTransaction(models.Model):
+    """
+    Audit log for all payment-related activities.
+    """
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    organization = models.ForeignKey(Organization, on_delete=models.SET_NULL, null=True, related_name='transactions')
+    transaction_id = models.CharField(max_length=100, db_index=True, help_text="Razorpay Order ID or Payment ID")
+    event_type = models.CharField(max_length=100)
+    amount = models.DecimalField(max_digits=12, decimal_places=2, null=True, blank=True)
+    status = models.CharField(max_length=50, default="processed")
+    payload = models.JSONField(default=dict)
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+
+    class Meta:
+        ordering = ['-created_at']
+        verbose_name = 'Billing Transaction'
+        verbose_name_plural = 'Billing Transactions'
+
+    def __str__(self):
+        return f"{self.event_type} - {self.transaction_id} - {self.created_at}"
+
+
+class Refund(models.Model):
+    """
+    Tracks refund requests and their outcomes.
+    """
+    class StatusTypes(models.TextChoices):
+        PENDING = 'pending', 'Pending'
+        PROCESSED = 'processed', 'Processed'
+        FAILED = 'failed', 'Failed'
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    organization = models.ForeignKey(Organization, on_delete=models.CASCADE, related_name='refunds')
+    payment_id = models.CharField(max_length=100, db_index=True)
+    refund_id = models.CharField(max_length=100, null=True, blank=True, unique=True)
+    amount = models.DecimalField(max_digits=12, decimal_places=2)
+    status = models.CharField(max_length=20, choices=StatusTypes.choices, default=StatusTypes.PENDING)
+    reason = models.TextField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f"Refund {self.amount} for {self.payment_id} ({self.status})"
+
+
+class Invoice(models.Model):
+    """
+    Stores metadata for billing documents generated by the payment gateway.
+    """
+    class Status(models.TextChoices):
+        ISSUED = 'issued', 'Issued'
+        PAID = 'paid', 'Paid'
+        CANCELLED = 'cancelled', 'Cancelled'
+        FAILED = 'failed', 'Failed'
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    organization = models.ForeignKey(Organization, on_delete=models.CASCADE, related_name='invoices')
+    razorpay_invoice_id = models.CharField(max_length=255, unique=True, null=True, blank=True)
+    razorpay_payment_id = models.CharField(max_length=255, null=True, blank=True)
+    
+    amount = models.DecimalField(max_digits=12, decimal_places=2)
+    currency = models.CharField(max_length=10, default='INR')
+    status = models.CharField(max_length=20, choices=Status.choices, default=Status.ISSUED)
+    
+    invoice_pdf_url = models.URLField(max_length=1024, null=True, blank=True)
+    issued_at = models.DateTimeField(default=timezone.now)
+    paid_at = models.DateTimeField(null=True, blank=True)
+    
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['-issued_at']
+        verbose_name = 'Invoice'
+        verbose_name_plural = 'Invoices'
+
+    def __str__(self):
+        return f"Invoice {self.razorpay_invoice_id or self.id} - {self.organization.name}"
+
+
+class AuditLog(models.Model):
+    """
+    Security audit trail for tracking administrative and sensitive system actions.
+    """
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    organization = models.ForeignKey(Organization, on_delete=models.SET_NULL, null=True, related_name='audit_logs')
+    actor = models.ForeignKey(CustomUser, on_delete=models.SET_NULL, null=True, related_name='actions_performed')
+    
+    action = models.CharField(max_length=100, db_index=True) # e.g. ROLE_CHANGE, SEAT_UPDATE
+    description = models.TextField()
+    payload = models.JSONField(default=dict, help_text="Stores before/after state or raw request data")
+    
+    ip_address = models.GenericIPAddressField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+
+    class Meta:
+        ordering = ['-created_at']
+        verbose_name = 'Audit Log'
+        verbose_name_plural = 'Audit Logs'
+
+    def __str__(self):
+        actor_name = self.actor.email if self.actor else "System"
+        return f"[{self.action}] {actor_name} @ {self.created_at}"
+
+
+class SupportTicket(models.Model):
+    """
+    User-initiated support request.
+    """
+    class Status(models.TextChoices):
+        OPEN = 'OPEN', 'Open'
+        IN_PROGRESS = 'IN_PROGRESS', 'In Progress'
+        RESOLVED = 'RESOLVED', 'Resolved'
+        CLOSED = 'CLOSED', 'Closed'
+
+    class Category(models.TextChoices):
+        BILLING = 'BILLING', 'Billing Issue'
+        TECHNICAL = 'TECHNICAL', 'Technical Problem'
+        FEATURE_REQUEST = 'FEATURE', 'Feature Request'
+        OTHER = 'OTHER', 'Other'
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    user = models.ForeignKey(CustomUser, on_delete=models.CASCADE, related_name='tickets')
+    subject = models.CharField(max_length=255)
+    category = models.CharField(max_length=20, choices=Category.choices, default=Category.OTHER)
+    status = models.CharField(max_length=20, choices=Status.choices, default=Status.OPEN)
+    
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['-updated_at']
+
+    def __str__(self):
+        return f"[{self.status}] {self.subject} - {self.user.email}"
+
+
+class SupportTicketMessage(models.Model):
+    """
+    A single message within a support ticket thread.
+    """
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    ticket = models.ForeignKey(SupportTicket, on_delete=models.CASCADE, related_name='messages')
+    sender = models.ForeignKey(CustomUser, on_delete=models.CASCADE)
+    
+    content = models.TextField()
+    is_internal = models.BooleanField(default=False, help_text="If true, only developers see this message")
+    
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['created_at']
+
+    def __str__(self):
+        return f"From {self.sender.email} @ {self.created_at}"
+
+
+class PhoneOTP(models.Model):
+    """
+    Temporarily stores phone verification codes for users.
+    Codes are short-lived and single-use.
+    """
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    user = models.ForeignKey(CustomUser, on_delete=models.CASCADE, related_name='phone_otps')
+    code = models.CharField(max_length=8)
+    created_at = models.DateTimeField(auto_now_add=True)
+    used = models.BooleanField(default=False)
+    attempts = models.IntegerField(default=0)
+
+    class Meta:
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f"OTP for {self.user.email} ({'used' if self.used else 'new'})"
+
+
+class AdWatch(models.Model):
+    """
+    Records an ad watch event for a user. In production, `validated` should only
+    be True after verifying the provider's proof/token/webhook.
+    """
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    user = models.ForeignKey(CustomUser, on_delete=models.CASCADE, related_name='ad_watches')
+    provider = models.CharField(max_length=100, default='mock')
+    ad_id = models.CharField(max_length=255, blank=True, null=True)
+    validated = models.BooleanField(default=False)
+    ip_address = models.GenericIPAddressField(null=True, blank=True)
+    user_agent = models.CharField(max_length=512, blank=True, null=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f"AdWatch {self.provider}:{self.ad_id} by {self.user.email} ({'validated' if self.validated else 'unvalidated'})"
+
+
+class AdRewardGrant(models.Model):
+    """
+    Records rewards given to users for watching ads (credits or AI access).
+    """
+    class GrantType(models.TextChoices):
+        CREDIT = 'CREDIT', 'Credit Seconds'
+        AI_ACCESS = 'AI_ACCESS', 'AI Access Uses'
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    user = models.ForeignKey(CustomUser, on_delete=models.CASCADE, related_name='ad_rewards')
+    grant_type = models.CharField(max_length=20, choices=GrantType.choices)
+    amount_seconds = models.IntegerField(null=True, blank=True)
+    uses = models.IntegerField(default=0)
+    source = models.CharField(max_length=50, default='ads')
+    created_at = models.DateTimeField(auto_now_add=True)
+    expires_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f"Reward {self.grant_type} for {self.user.email} ({self.amount_seconds or self.uses})"
 

@@ -1,0 +1,14 @@
+{% extends "emails/base_email.html" %}
+
+{% block content %}
+<h2 style="color: #0f172a; margin-top: 0;">Refund Processed</h2>
+<p>Hello <span class="highlight">{{ user_name }}</span>,</p>
+<p>This is to confirm that we have processed a refund of <span class="highlight">{{ currency }} {{ amount }}</span> to
+    your original payment method for your Posture OS account.</p>
+
+<p>The funds should appear in your account within 5-10 business days, depending on your bank's processing times.</p>
+
+<p>If you have any questions, please reply to this email.</p>
+
+<p>Best regards,<br>The Posture Team</p>
+{% endblock %}

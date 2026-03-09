@@ -12,6 +12,7 @@ import {
     Camera, Server, ShieldCheck, Activity, Copy, Check,
     AlertCircle, Wifi, WifiOff, Loader2, Plus, GripHorizontal, PlaySquare
 } from "lucide-react"
+import { apiFetch } from "@/lib/api"
 
 export default function CameraGatewayPage() {
     const { sessionStatus, isLoading, hasSubscription, user, isAdmin, token, org } = useSubscription()
@@ -26,7 +27,7 @@ export default function CameraGatewayPage() {
     }, [sessionStatus, isLoading, isAdmin, router])
 
     const fetchNodes = async () => {
-        const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"}/api/v1/cctv/dashboard/nodes/`, {
+        const res = await apiFetch(`${process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"}/api/v1/cctv/dashboard/nodes/`, {
             headers: { Authorization: `Bearer ${token}` }
         })
         if (!res.ok) throw new Error("Failed to fetch CCTV nodes")

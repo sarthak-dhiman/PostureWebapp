@@ -5,17 +5,21 @@ import { useSubscription } from "@/hooks/useSubscription"
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import { useRouter } from "next/navigation"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { Users, ShieldAlert, Loader2, Link as LinkIcon, Plus, Minus, Check, Copy, Camera } from "lucide-react"
+import { Users, ShieldAlert, Loader2, Link as LinkIcon, Plus, Minus, Check, Copy, Camera, MoreVertical, Shield, UserMinus, Clock } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import Link from "next/link"
+import { apiFetch } from "@/lib/api"
 
 export default function DashboardPage() {
-    const { sessionStatus, isLoading, hasSubscription, org, isAdmin, user, token } = useSubscription()
+    const { sessionStatus, isLoading, hasSubscription, org, isAdmin, user, token, currentPeriodEnd } = useSubscription()
     const router = useRouter()
     const queryClient = useQueryClient()
     const [copiedLink, setCopiedLink] = useState(false)
     const [copiedCode, setCopiedCode] = useState(false)
     const [inviteLink, setInviteLink] = useState('')
+    const [newMemberId, setNewMemberId] = useState('')
+    const [pendingSeats, setPendingSeats] = useState<number | null>(null)
 
     // Read session_id from URL on client only
     const [sessionId, setSessionId] = useState<string | null>(null)
@@ -34,7 +38,7 @@ export default function DashboardPage() {
 
     // Fetch detailed Organization Data for Admin Dashboard (users, invite code, seats)
     const fetchDetailedOrgData = async () => {
-        const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"}/api/v1/orgs/me/`, {
+        const res = await apiFetch(`${process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"}/api/v1/orgs/me/`, {
             headers: { Authorization: `Bearer ${token}` }
         })
         if (!res.ok) throw new Error("Failed to fetch organization details")
@@ -55,7 +59,7 @@ export default function DashboardPage() {
 
     const updateSeatsMutation = useMutation({
         mutationFn: async (newSeats: number) => {
-            const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"}/api/v1/orgs/me/`, {
+            const res = await apiFetch(`${process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"}/api/v1/orgs/me/`, {
                 method: "PATCH",
                 headers: {
                     "Content-Type": "application/json",
@@ -73,6 +77,56 @@ export default function DashboardPage() {
             queryClient.invalidateQueries({ queryKey: ["orgDashboard"] })
             queryClient.invalidateQueries({ queryKey: ["userProfile"] })
             setPendingSeats(null)
+        }
+    })
+
+    const manageMemberMutation = useMutation({
+        mutationFn: async ({ userId, action }: { userId: string, action: 'promote' | 'demote' | 'remove' }) => {
+            const res = await apiFetch(`${process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"}/api/v1/orgs/me/members/${userId}/`, {
+                method: "PATCH",
+                headers: {
+                    "Content-Type": "application/json",
+                    Authorization: `Bearer ${token}`
+                },
+                body: JSON.stringify({ action })
+            })
+            if (!res.ok) {
+                const err = await res.json()
+                throw new Error(err.detail || "Failed to manage member")
+            }
+            return res.json()
+        },
+        onSuccess: (data) => {
+            queryClient.invalidateQueries({ queryKey: ["orgDashboard"] })
+        },
+        onError: (err: any) => {
+            alert(err.message)
+        }
+    })
+
+    const addMemberMutation = useMutation({
+        mutationFn: async (userIdToAdd: string) => {
+            const res = await apiFetch(`${process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"}/api/v1/orgs/me/members/add/`, {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                    Authorization: `Bearer ${token}`
+                },
+                body: JSON.stringify({ user_id: parseInt(userIdToAdd, 10) })
+            })
+            if (!res.ok) {
+                const err = await res.json()
+                throw new Error(err.detail || "Failed to add member")
+            }
+            return res.json()
+        },
+        onSuccess: () => {
+            queryClient.invalidateQueries({ queryKey: ["orgDashboard"] })
+            setNewMemberId('')
+            alert("User successfully added to organization.")
+        },
+        onError: (err: any) => {
+            alert(err.message)
         }
     })
 
@@ -122,6 +176,8 @@ export default function DashboardPage() {
     const activeUsers = orgData?.users?.length || 0
     const maxSeats = orgData?.max_seats || 5
 
+    const daysRemaining = currentPeriodEnd ? Math.ceil((new Date(currentPeriodEnd).getTime() - new Date().getTime()) / (1000 * 60 * 60 * 24)) : null
+
     const copyInviteLink = () => {
         navigator.clipboard.writeText(inviteLink)
         setCopiedLink(true)
@@ -135,8 +191,6 @@ export default function DashboardPage() {
             setTimeout(() => setCopiedCode(false), 2000)
         }
     }
-
-    const [pendingSeats, setPendingSeats] = useState<number | null>(null)
 
     const changeSeats = (delta: number) => {
         const newTotal = maxSeats + delta
@@ -223,6 +277,29 @@ export default function DashboardPage() {
                                 </Button>
                             </div>
                         </div>
+
+                        <div>
+                            <p className="text-xs font-semibold text-slate-500 mb-1">Direct Add by ID</p>
+                            <div className="flex gap-2">
+                                <input
+                                    placeholder="Enter User ID..."
+                                    value={newMemberId}
+                                    onChange={(e) => setNewMemberId(e.target.value)}
+                                    className="bg-slate-100/80 border border-slate-200 text-xs w-full px-3 py-2 text-slate-900 rounded-lg focus:outline-none focus:ring-2 focus:ring-violet-500/20"
+                                />
+                                <Button
+                                    size="sm"
+                                    onClick={() => {
+                                        if (newMemberId.trim()) addMemberMutation.mutate(newMemberId)
+                                    }}
+                                    disabled={addMemberMutation.isPending || !newMemberId.trim()}
+                                    className="shrink-0 font-bold bg-violet-600 hover:bg-violet-700 text-white"
+                                >
+                                    {addMemberMutation.isPending ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Plus className="w-4 h-4 mr-2" />}
+                                    Add
+                                </Button>
+                            </div>
+                        </div>
                     </CardContent>
                 </Card>
 
@@ -261,6 +338,18 @@ export default function DashboardPage() {
                                 </Button>
                             </div>
                         </div>
+
+                        {daysRemaining !== null && (
+                            <div className="mt-6 flex items-center justify-between bg-violet-50 p-3 rounded-lg border border-violet-100">
+                                <div className="flex items-center gap-2">
+                                    <Clock className="w-4 h-4 text-violet-500" />
+                                    <span className="text-xs font-bold text-violet-900">Cycle Ends In</span>
+                                </div>
+                                <span className="text-xs font-black text-violet-700 uppercase tracking-wider">
+                                    {daysRemaining <= 0 ? "Resetting Today" : `${daysRemaining} Days`}
+                                </span>
+                            </div>
+                        )}
                     </CardContent>
                 </Card>
 
@@ -311,6 +400,50 @@ export default function DashboardPage() {
                                     <span className={`px-2.5 py-0.5 rounded-full text-xs font-bold uppercase tracking-wider ${u.role === 'ADMIN' ? 'bg-indigo-100 text-indigo-700' : 'bg-slate-100 text-slate-600'}`}>
                                         {u.role}
                                     </span>
+
+                                    <DropdownMenu>
+                                        <DropdownMenuTrigger asChild>
+                                            <Button variant="ghost" size="icon" className="h-8 w-8 text-slate-500 hover:text-slate-900" disabled={manageMemberMutation.isPending}>
+                                                <MoreVertical className="h-4 w-4" />
+                                            </Button>
+                                        </DropdownMenuTrigger>
+                                        <DropdownMenuContent align="end" className="w-56 font-medium">
+                                            <DropdownMenuLabel className="text-xs text-slate-500 font-bold uppercase tracking-wider">Manage Member</DropdownMenuLabel>
+                                            <DropdownMenuSeparator />
+
+                                            {u.id === user?.id ? (
+                                                <DropdownMenuItem disabled className="text-slate-400 cursor-not-allowed">
+                                                    You cannot modify yourself
+                                                </DropdownMenuItem>
+                                            ) : (
+                                                <>
+                                                    {u.role === 'EMPLOYEE' ? (
+                                                        <DropdownMenuItem onClick={() => manageMemberMutation.mutate({ userId: u.id, action: 'promote' })} className="cursor-pointer text-indigo-600 focus:text-indigo-700 focus:bg-indigo-50">
+                                                            <Shield className="mr-2 h-4 w-4" />
+                                                            Promote to Admin
+                                                        </DropdownMenuItem>
+                                                    ) : (
+                                                        <DropdownMenuItem onClick={() => manageMemberMutation.mutate({ userId: u.id, action: 'demote' })} className="cursor-pointer">
+                                                            <Users className="mr-2 h-4 w-4" />
+                                                            Demote to Employee
+                                                        </DropdownMenuItem>
+                                                    )}
+                                                    <DropdownMenuSeparator />
+                                                    <DropdownMenuItem
+                                                        onClick={() => {
+                                                            if (window.confirm(`Are you sure you want to remove ${u.email} from the organization? They will be converted to a solo account.`)) {
+                                                                manageMemberMutation.mutate({ userId: u.id, action: 'remove' })
+                                                            }
+                                                        }}
+                                                        className="cursor-pointer text-red-600 focus:text-red-700 focus:bg-red-50"
+                                                    >
+                                                        <UserMinus className="mr-2 h-4 w-4" />
+                                                        Remove from Organization
+                                                    </DropdownMenuItem>
+                                                </>
+                                            )}
+                                        </DropdownMenuContent>
+                                    </DropdownMenu>
                                 </div>
                             </div>
                         ))}

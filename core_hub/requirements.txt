@@ -3,11 +3,10 @@ djangorestframework
 djangorestframework-simplejwt
 django-environ
 psycopg2-binary
-stripe
-gunicorn
-whitenoise[brotli]
-django-cors-headers
+razorpay
+django-cors-headers==4.3.1
 drf-spectacular
 channels
 daphne
 channels-redis
+whitenoise

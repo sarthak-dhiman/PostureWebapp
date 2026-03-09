@@ -1,0 +1,22 @@
+{% extends "emails/base_email.html" %}
+
+{% block content %}
+<h2 style="color: #0f172a; margin-top: 0;">Payment Successful 🎉</h2>
+<p>Hello <span class="highlight">{{ user_name }}</span>,</p>
+<p>Great news! Your payment for the <span class="highlight">{{ plan_name }}</span> plan has been successfully processed.
+    Your organization <span class="highlight">{{ org_name }}</span> is now active and your premium features have been
+    unlocked.</p>
+
+<div style="background-color: #fdf2f8; border: 1px solid #fbcfe8; padding: 20px; border-radius: 12px; margin: 20px 0;">
+    <p style="margin: 0; font-size: 14px; color: #9d174d;"><strong>Billing Cycle:</strong> Next reset on {{ cycle_end }}
+    </p>
+</div>
+
+<div style="text-align: center;">
+    <a href="{{ dashboard_url }}" class="button">Open Dashboard</a>
+</div>
+
+<p>If you have any questions about your subscription, please visit your billing settings in the app.</p>
+
+<p>Best regards,<br>The Posture Team</p>
+{% endblock %}

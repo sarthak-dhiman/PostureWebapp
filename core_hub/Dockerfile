@@ -1,3 +1,4 @@
+# syntax=docker/dockerfile:1.4
 FROM python:3.12-slim
 
 # Prevent Python from writing .pyc files and enable unbuffered logging
@@ -13,11 +14,12 @@ RUN apt-get update && apt-get install -y \
     netcat-openbsd \
     && rm -rf /var/lib/apt/lists/*
 
-# Install Python dependencies
+# Install Python dependencies using BuildKit cache for pip
 COPY requirements.txt .
-# If requirements.txt doesn't exist, we install the manually defined packages
-RUN if [ -f requirements.txt ]; then pip install --no-cache-dir -r requirements.txt; else pip install --no-cache-dir django djangorestframework djangorestframework-simplejwt django-environ psycopg2-binary stripe gunicorn; fi
+RUN --mount=type=cache,target=/root/.cache/pip \
+    sh -c "if [ -f requirements.txt ]; then pip install --no-cache-dir -r requirements.txt; else pip install --no-cache-dir django djangorestframework djangorestframework-simplejwt django-environ psycopg2-binary stripe gunicorn; fi"
 
+# Copy application code (after deps to maximize layer caching)
 COPY . /app/
 
 # Set up entrypoint

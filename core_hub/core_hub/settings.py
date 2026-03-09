@@ -26,6 +26,11 @@ STRIPE_PUBLIC_KEY = env('STRIPE_PUBLIC_KEY', default='pk_test_placeholder')
 STRIPE_SECRET_KEY = env('STRIPE_SECRET_KEY', default='sk_test_placeholder')
 STRIPE_WEBHOOK_SECRET = env('STRIPE_WEBHOOK_SECRET', default='whsec_placeholder')
 
+# Cloudflare Turnstile secret (server-side). Keep empty in production only if
+# you intend to use a different CAPTCHA provider. For local development set
+# this in your .env or rely on DEBUG-mode bypass in the verifier.
+TURNSTILE_SECRET_KEY = env('TURNSTILE_SECRET_KEY', default=None)
+
 
 # ─── Google OAuth ─────────────────────────────────────────────────────────────
 GOOGLE_OAUTH_CLIENT_ID = env('GOOGLE_OAUTH_CLIENT_ID', default='')
@@ -108,6 +113,15 @@ DATABASES = {
     )
 }
 
+# ─── Cache ────────────────────────────────────────────────────────────────────
+# Required for DRF Throttling to function across requests
+CACHES = {
+    'default': {
+        'BACKEND': 'django.core.cache.backends.locmem.LocMemCache',
+        'LOCATION': 'unique-snowflake',
+    }
+}
+
 # ─── Password Validation ──────────────────────────────────────────────────────
 AUTH_PASSWORD_VALIDATORS = [
     {'NAME': 'django.contrib.auth.password_validation.UserAttributeSimilarityValidator'},
@@ -136,6 +150,15 @@ CORS_ALLOWED_ORIGINS = [
 ]
 CORS_ALLOW_CREDENTIALS = True
 
+# ─── CSRF Protection for SPA ──────────────────────────────────────────────────
+CSRF_TRUSTED_ORIGINS = [
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+]
+CSRF_COOKIE_SAMESITE = 'Lax'
+CSRF_COOKIE_HTTPONLY = False  # Allows the React frontend to read it
+CSRF_USE_SESSIONS = False
+
 # ─── Django REST Framework ────────────────────────────────────────────────────
 REST_FRAMEWORK = {
     'DEFAULT_AUTHENTICATION_CLASSES': [
@@ -143,12 +166,24 @@ REST_FRAMEWORK = {
         'core_api.authentication.ApiKeyAuthentication',
     ],
     'DEFAULT_PERMISSION_CLASSES': [
+        'core_api.permissions.EnforceCSRFPermission',
         'rest_framework.permissions.IsAuthenticated',
     ],
     'DEFAULT_RENDERER_CLASSES': [
         'rest_framework.renderers.JSONRenderer',
     ],
     'DEFAULT_SCHEMA_CLASS': 'drf_spectacular.openapi.AutoSchema',
+    'DEFAULT_THROTTLE_CLASSES': [
+        'rest_framework.throttling.AnonRateThrottle',
+        'rest_framework.throttling.UserRateThrottle',
+        'rest_framework.throttling.ScopedRateThrottle',
+    ],
+    'DEFAULT_THROTTLE_RATES': {
+        'anon': '100/minute',
+        'user': '1000/minute',
+        'login_attempt': '5/minute',
+        'register_attempt': '10/hour',
+    }
 }
 
 # ─── DRF Spectacular ────────────────────────────────────────────────────────
@@ -170,3 +205,17 @@ SIMPLE_JWT = {
     'USER_ID_FIELD': 'id',
     'USER_ID_CLAIM': 'user_id',
 }
+
+# --- SMTP Email Configuration ---
+if env('EMAIL_HOST', default=None):
+    EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
+    EMAIL_HOST = env('EMAIL_HOST')
+    EMAIL_PORT = env.int('EMAIL_PORT', default=587)
+    EMAIL_USE_TLS = env.bool('EMAIL_USE_TLS', default=True)
+    EMAIL_HOST_USER = env('EMAIL_HOST_USER', default='')
+    EMAIL_HOST_PASSWORD = env('EMAIL_HOST_PASSWORD', default='')
+    DEFAULT_FROM_EMAIL = env('DEFAULT_FROM_EMAIL', default=EMAIL_HOST_USER)
+else:
+    # Output emails to the console during local development if SMTP keys aren't set
+    EMAIL_BACKEND = 'django.core.mail.backends.console.EmailBackend'
+    DEFAULT_FROM_EMAIL = "noreply@posturewebapp.local"

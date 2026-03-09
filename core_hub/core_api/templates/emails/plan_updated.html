@@ -1,0 +1,24 @@
+{% extends "emails/base_email.html" %}
+
+{% block content %}
+<h2 style="color: #0f172a; margin-top: 0;">Subscription Updated ⚡</h2>
+<p>Hello <span class="highlight">{{ user_name }}</span>,</p>
+<p>This is to confirm that your Posture OS subscription for <span class="highlight">{{ org_name }}</span> has been
+    successfully updated.</p>
+
+<div style="background-color: #f0fdf4; border: 1px solid #bbf7d0; padding: 20px; border-radius: 12px; margin: 20px 0;">
+    <p style="margin: 0; font-size: 14px; color: #166534;"><strong>New Plan/Seats:</strong> {{ plan_details }}</p>
+    <p style="margin: 5px 0 0 0; font-size: 14px; color: #166534;"><strong>Total Seats Enabled:</strong> {{ max_seats }}
+    </p>
+</div>
+
+<p>Your new limits are effective immediately. You can now manage your team members from the dashboard.</p>
+
+<div style="text-align: center;">
+    <a href="{{ dashboard_url }}" class="button">Open Dashboard</a>
+</div>
+
+<p>If you have any questions about these changes, feel free to reply to this email.</p>
+
+<p>Best regards,<br>The Posture Team</p>
+{% endblock %}

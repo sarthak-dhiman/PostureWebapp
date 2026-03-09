@@ -33,11 +33,23 @@ function PricingContent() {
         combo: { monthly: "1.50", quarterly: "3", yearly: "8" }
     }
 
-    const stripePriceIds = {
-        webcam: { monthly: "price_mock_webcam_mo", quarterly: "price_mock_webcam_qtr", yearly: "price_mock_webcam_yr" },
-        health: { monthly: "price_mock_health_mo", quarterly: "price_mock_health_qtr", yearly: "price_mock_health_yr" },
-        combo: { monthly: "price_mock_combo_mo", quarterly: "price_mock_combo_qtr", yearly: "price_mock_combo_yr" },
-        business: "price_mock_business_mo"
+    const razorpayPlanIds = {
+        webcam: {
+            monthly: process.env.NEXT_PUBLIC_RAZORPAY_PLAN_WEBCAM_MO || "plan_mock_webcam_mo",
+            quarterly: process.env.NEXT_PUBLIC_RAZORPAY_PLAN_WEBCAM_QTR || "plan_mock_webcam_qtr",
+            yearly: process.env.NEXT_PUBLIC_RAZORPAY_PLAN_WEBCAM_YR || "plan_mock_webcam_yr"
+        },
+        health: {
+            monthly: process.env.NEXT_PUBLIC_RAZORPAY_PLAN_HEALTH_MO || "plan_mock_health_mo",
+            quarterly: process.env.NEXT_PUBLIC_RAZORPAY_PLAN_HEALTH_QTR || "plan_mock_health_qtr",
+            yearly: process.env.NEXT_PUBLIC_RAZORPAY_PLAN_HEALTH_YR || "plan_mock_health_yr"
+        },
+        combo: {
+            monthly: process.env.NEXT_PUBLIC_RAZORPAY_PLAN_COMBO_MO || "plan_mock_combo_mo",
+            quarterly: process.env.NEXT_PUBLIC_RAZORPAY_PLAN_COMBO_QTR || "plan_mock_combo_qtr",
+            yearly: process.env.NEXT_PUBLIC_RAZORPAY_PLAN_COMBO_YR || "plan_mock_combo_yr"
+        },
+        business: process.env.NEXT_PUBLIC_RAZORPAY_PLAN_BUSINESS || "plan_mock_business_mo"
     }
 
     const periodLabels = { monthly: "/mo", quarterly: "/qtr", yearly: "/yr" }
@@ -120,7 +132,7 @@ function PricingContent() {
                         ]}
                         buttonText="Start Free Trial"
                         href={`/signup?plan=webcam&cycle=${cycle}`}
-                        priceId={stripePriceIds.webcam[cycle]}
+                        priceId={razorpayPlanIds.webcam[cycle]}
                     />
 
                     {/* Tier 2: Disease AI */}
@@ -139,7 +151,7 @@ function PricingContent() {
                         ]}
                         buttonText="Start Free Trial"
                         href={`/signup?plan=health&cycle=${cycle}`}
-                        priceId={stripePriceIds.health[cycle]}
+                        priceId={razorpayPlanIds.health[cycle]}
                     />
 
                     {/* Tier 3: Combo */}
@@ -160,7 +172,7 @@ function PricingContent() {
                         ]}
                         buttonText="Get The Combo"
                         href={`/signup?plan=combo&cycle=${cycle}`}
-                        priceId={stripePriceIds.combo[cycle]}
+                        priceId={razorpayPlanIds.combo[cycle]}
                     />
                 </div>
             )}
@@ -185,7 +197,7 @@ function PricingContent() {
                         ]}
                         buttonText="Get Started"
                         href="/signup?plan=business"
-                        priceId={stripePriceIds.business}
+                        priceId={razorpayPlanIds.business}
                     />
 
                     <PricingCard
@@ -280,7 +292,7 @@ function PricingCard({
             {priceId ? (
                 <div className="space-y-3">
                     <SubscribeButton
-                        priceId={priceId}
+                        planId={priceId}
                         planName={title}
                         buttonText={buttonText}
                         fallbackUrl={href}
@@ -300,7 +312,7 @@ function PricingCard({
                     <GiftSubscriptionModal
                         isOpen={isGiftModalOpen}
                         onClose={() => setIsGiftModalOpen(false)}
-                        priceId={priceId}
+                        planId={priceId}
                         planName={title}
                     />
                 </div>

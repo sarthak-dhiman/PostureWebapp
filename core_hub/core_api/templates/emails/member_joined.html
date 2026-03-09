@@ -1,0 +1,20 @@
+{% extends "emails/base_email.html" %}
+
+{% block content %}
+<h2 style="color: #0f172a; margin-top: 0;">New Team Member! 👋</h2>
+<p>Hello <span class="highlight">{{ admin_name }}</span>,</p>
+<p>A new user has just joined your organization <span class="highlight">{{ org_name }}</span> via an invite link.</p>
+
+<div style="background-color: #f8fafc; border: 1px solid #e2e8f0; padding: 20px; border-radius: 12px; margin: 20px 0;">
+    <p style="margin: 0; font-size: 14px; color: #475569;"><strong>Member Name:</strong> {{ member_name }}</p>
+    <p style="margin: 5px 0 0 0; font-size: 14px; color: #475569;"><strong>Member Email:</strong> {{ member_email }}</p>
+</div>
+
+<p>You can manage their permissions and role settings directly from the Member Management section of your dashboard.</p>
+
+<div style="text-align: center;">
+    <a href="{{ dashboard_url }}/settings/members" class="button">Manage Members</a>
+</div>
+
+<p>Best regards,<br>The Posture Team</p>
+{% endblock %}

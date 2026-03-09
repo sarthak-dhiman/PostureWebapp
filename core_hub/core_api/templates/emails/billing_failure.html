@@ -1,0 +1,19 @@
+{% extends "emails/base_email.html" %}
+
+{% block content %}
+<h2 style="color: #ef4444; margin-top: 0;">Action Required: Payment Failed</h2>
+<p>Hello <span class="highlight">{{ user_name }}</span>,</p>
+<p>We're having some trouble processing your recent payment for your Posture OS subscription. Unfortunately, this means
+    your organization <span class="highlight">{{ org_name }}</span> has been temporarily restricted.</p>
+
+<p>To restore access to your premium features and seat management, please update your payment method at your earliest
+    convenience.</p>
+
+<div style="text-align: center;">
+    <a href="{{ billing_url }}" class="button">Update Payment Method</a>
+</div>
+
+<p>If you have any questions or believe this is an error, please contact our support team.</p>
+
+<p>Best regards,<br>The Posture Team</p>
+{% endblock %}

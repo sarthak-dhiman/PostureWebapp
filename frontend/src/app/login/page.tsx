@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { ShieldCheck, Loader2, Activity, Users, Zap, CheckCircle2 } from "lucide-react"
+import { TurnstileWidget } from "@/components/ui/turnstile-widget"
 
 export default function LoginPage() {
     const router = useRouter()
@@ -15,6 +16,7 @@ export default function LoginPage() {
     const [password, setPassword] = useState("")
     const [error, setError] = useState("")
     const [loading, setLoading] = useState(false)
+    const [turnstileToken, setTurnstileToken] = useState("")
 
     useEffect(() => {
         if (status === "authenticated") {
@@ -30,12 +32,17 @@ export default function LoginPage() {
         const res = await signIn("credentials", {
             username,
             password,
+            "cf-turnstile-response": turnstileToken,
             redirect: false,
         })
 
         if (res?.error) {
             console.error("signIn returned error:", res.error, res)
-            setError("Invalid username or password")
+            if (res.error === "email_not_verified") {
+                setError("Please check your email to verify your account before logging in.")
+            } else {
+                setError("Invalid username or password")
+            }
             setLoading(false)
         }
         // No else block here, as redirect is handled by useEffect based on session status
@@ -46,9 +53,9 @@ export default function LoginPage() {
             {/* Left Side - Product Showcase */}
             <div className="hidden lg:flex flex-col justify-center relative bg-slate-900 text-white overflow-hidden p-16 xl:p-24">
                 {/* Decorative BG elements */}
-                <div className="absolute top-0 right-0 w-[500px] h-[500px] bg-violet-600/30 rounded-full blur-[100px] -z-0 -translate-y-1/2 translate-x-1/2" />
-                <div className="absolute bottom-0 left-0 w-[500px] h-[500px] bg-indigo-600/30 rounded-full blur-[100px] -z-0 translate-y-1/2 -translate-x-1/2" />
-                <div className="absolute inset-0 bg-[url('https://grainy-gradients.vercel.app/noise.svg')] opacity-20 mix-blend-overlay z-0"></div>
+                <div className="absolute top-0 right-0 w-[500px] h-[500px] bg-violet-600/30 rounded-full blur-[100px] -z-0 -translate-y-1/2 translate-x-[20%]" />
+                <div className="absolute bottom-0 left-0 w-[500px] h-[500px] bg-indigo-600/30 rounded-full blur-[100px] -z-0 translate-y-1/2 -translate-x-[20%]" />
+                <div className="absolute inset-0 bg-[url('https://grainy-gradients.vercel.app/noise.svg')] opacity-10 mix-blend-overlay z-0"></div>
 
                 <div className="relative z-10 max-w-xl">
                     <div className="inline-flex items-center gap-2 text-xs font-bold uppercase tracking-widest text-violet-300 bg-violet-900/50 border border-violet-500/30 rounded-full px-4 py-2 mb-8 backdrop-blur-md">
@@ -120,7 +127,12 @@ export default function LoginPage() {
                         </div>
                         {error && <p className="text-sm text-destructive font-bold">{error}</p>}
 
-                        <Button type="submit" className="w-full h-12 bg-slate-900 hover:bg-slate-800 text-white font-bold rounded-xl shadow-lg shadow-slate-900/20 transition-all hover:scale-[1.02] active:scale-[0.98]" disabled={loading}>
+                        <TurnstileWidget
+                            onVerify={(token) => setTurnstileToken(token)}
+                            onError={() => setTurnstileToken("")}
+                        />
+
+                        <Button type="submit" className="w-full h-12 bg-slate-900 hover:bg-slate-800 text-white font-bold rounded-xl shadow-lg shadow-slate-900/20 transition-all hover:scale-[1.02] active:scale-[0.98]" disabled={loading || !turnstileToken}>
                             {loading ? (
                                 <>
                                     <Loader2 className="mr-2 h-5 w-5 animate-spin" />

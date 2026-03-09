@@ -4,7 +4,36 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from .models import CustomUser, PlatformLog, ServiceAccount, Organization
-from .serializers import PlatformLogSerializer
+from rest_framework.throttling import ScopedRateThrottle
+from .utils.turnstile import verify_turnstile_token
+from .utils.email import send_verification_email, send_billing_email
+from django.utils.http import urlsafe_base64_decode
+from django.utils.encoding import force_str
+from django.contrib.auth.tokens import default_token_generator
+from django.utils.decorators import method_decorator
+from django.views.decorators.csrf import ensure_csrf_cookie
+from django.utils import timezone
+from datetime import timedelta
+from .models import PhoneOTP
+from .utils.sms import send_sms
+from .models import AdWatch, AdRewardGrant
+from rest_framework.permissions import IsAuthenticated
+from rest_framework.throttling import ScopedRateThrottle
+
+class CSRFTokenView(APIView):
+    """
+    GET /api/v1/auth/csrf/
+    Forces Django to set a CSRF cookie on the client.
+    The frontend calls this immediately upon loading the application.
+    """
+    permission_classes = []
+
+    @method_decorator(ensure_csrf_cookie)
+    def dispatch(self, *args, **kwargs):
+        return super().dispatch(*args, **kwargs)
+
+    def get(self, request):
+        return Response({'message': 'CSRF cookie set'})
 
 
 # Mapping from ServiceAccount.source_type → permitted app_source values.
@@ -112,12 +141,95 @@ class UserProfileView(APIView):
                 'id': str(user.organization.id),
                 'name': user.organization.name,
                 'is_active': user.organization.is_active,
-                'has_subscription': bool(user.organization.stripe_subscription_id)
+                'has_subscription': bool(user.organization.razorpay_subscription_id),
+                'current_period_end': user.organization.current_period_end
             }
             
         remaining = user.quota_remaining_seconds()
         is_free = remaining is not None
             
+        return Response({
+            'id': user.id,
+            'username': user.username,
+            'email': user.email,
+            'first_name': user.first_name,
+            'last_name': user.last_name,
+            'role': user.role,
+            'organization': org_data,
+            'quota': {
+                'is_free_tier': is_free,
+                'quota_total_seconds': user.FREE_TIER_QUOTA_SECONDS if is_free else None,
+                'quota_used_seconds': user.monitoring_seconds_used if is_free else None,
+                'quota_remaining_seconds': remaining,
+                'quota_remaining_hours': round(remaining / 3600, 2) if remaining is not None else None,
+            }
+        })
+
+    def patch(self, request):
+        """
+        PATCH /api/v1/users/me/
+        Allows the authenticated user to update simple profile fields: first_name, last_name, email.
+        If the email is changed, the user's `is_email_verified` flag is cleared and a verification
+        email is sent to the new address.
+        """
+        user = request.user
+        if not isinstance(user, CustomUser):
+            return Response({'detail': 'Service accounts cannot update profiles.'}, status=status.HTTP_403_FORBIDDEN)
+
+        data = request.data
+        first_name = data.get('first_name')
+        last_name = data.get('last_name')
+        email = data.get('email')
+        phone = data.get('phone')
+
+        changed = False
+
+        if first_name is not None and first_name != user.first_name:
+            user.first_name = first_name
+            changed = True
+
+        if last_name is not None and last_name != user.last_name:
+            user.last_name = last_name
+            changed = True
+
+        if email is not None and email != user.email:
+            # Basic uniqueness check
+            if CustomUser.objects.filter(email=email).exclude(pk=user.pk).exists():
+                return Response({'detail': 'Email already in use.'}, status=status.HTTP_400_BAD_REQUEST)
+            user.email = email
+            user.is_email_verified = False
+            changed = True
+
+        if phone is not None and phone != user.phone_number:
+            # Basic normalization/uniqueness could be added here later.
+            user.phone_number = phone
+            user.is_phone_verified = False
+            changed = True
+
+        if changed:
+            user.save()
+            # If email changed, send a fresh verification email
+            if email is not None:
+                try:
+                    send_verification_email(user)
+                except Exception:
+                    # Don't fail the request if email sending fails; warn and continue
+                    print(f"Failed to send verification email to {user.email}")
+
+        # Return updated profile payload (same shape as GET)
+        org_data = None
+        if user.organization:
+            org_data = {
+                'id': str(user.organization.id),
+                'name': user.organization.name,
+                'is_active': user.organization.is_active,
+                'has_subscription': bool(user.organization.razorpay_subscription_id),
+                'current_period_end': user.organization.current_period_end
+            }
+
+        remaining = user.quota_remaining_seconds()
+        is_free = remaining is not None
+
         return Response({
             'id': user.id,
             'username': user.username,
@@ -426,6 +538,8 @@ class FlexibleTokenObtainPairView(APIView):
     Auto-creates the user if they don't exist to unblock local PySide6 development.
     """
     permission_classes = [AllowAny]
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = 'login_attempt'
 
     def get(self, request):
         """
@@ -471,8 +585,16 @@ class FlexibleTokenObtainPairView(APIView):
         if not identifier or not password:
             return Response({'detail': 'Must include email/username and password.'}, status=status.HTTP_400_BAD_REQUEST)
 
+        # Verify Turnstile
+        turnstile_token = request.data.get('cf-turnstile-response')
+        if not verify_turnstile_token(turnstile_token, request.META.get('REMOTE_ADDR')):
+            return Response({'detail': 'CAPTCHA verification failed. Please try again.'}, status=status.HTTP_400_BAD_REQUEST)
+
         # Auto-create the user if they don't exist to guarantee dev environments work
-        user = CustomUser.objects.filter(email=identifier).first() or CustomUser.objects.filter(username=identifier).first()
+        # Lookup both email and username in a single query to avoid creating a duplicate
+        # SOLO account when an existing user matches one of the identifiers.
+        from django.db.models import Q
+        user = CustomUser.objects.filter(Q(email=identifier) | Q(username=identifier)).first()
         
         if not user:
             # Create a mock user on the fly!
@@ -482,8 +604,14 @@ class FlexibleTokenObtainPairView(APIView):
                 email=email or f"{username}@local",
                 password=password,
                 organization=org,
-                role=CustomUser.Role.SOLO
+                role=CustomUser.Role.SOLO,
             )
+            # Solo users created on the fly this way are magically verified
+            user.is_email_verified = True
+            user.save()
+
+        if not user.is_email_verified:
+            return Response({'detail': 'email_not_verified'}, status=status.HTTP_403_FORBIDDEN)
 
         if user.check_password(password):
             refresh = RefreshToken.for_user(user)
@@ -501,6 +629,8 @@ class UserRegistrationView(APIView):
     If account_type is 'solo', it creates a private Organization.
     """
     permission_classes = [AllowAny]
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = 'register_attempt'
 
     def post(self, request):
         name = request.data.get('name')
@@ -512,6 +642,11 @@ class UserRegistrationView(APIView):
 
         if not email or not password or not account_type:
             return Response({"detail": "Missing required fields."}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Verify Turnstile
+        turnstile_token = request.data.get('cf-turnstile-response')
+        if not verify_turnstile_token(turnstile_token, request.META.get('REMOTE_ADDR')):
+            return Response({'detail': 'CAPTCHA verification failed. Please try again.'}, status=status.HTTP_400_BAD_REQUEST)
 
         if CustomUser.objects.filter(email=email).exists():
             return Response({"detail": "Email already registered."}, status=status.HTTP_400_BAD_REQUEST)
@@ -561,16 +696,217 @@ class UserRegistrationView(APIView):
             role=role
         )
 
-        refresh = RefreshToken.for_user(user)
+        # Send the verification email in the background (or blocking for now)
+        send_verification_email(user)
+
         return Response({
-            "access": str(refresh.access_token),
-            "refresh": str(refresh),
-            "user": {
-                "id": str(user.id),
-                "email": user.email,
-                "role": user.role
-            }
+            "detail": "Registration successful. Please check your email to verify your account."
         }, status=status.HTTP_201_CREATED)
+
+class VerifyEmailView(APIView):
+    """
+    POST /api/v1/auth/verify-email/
+    Redeems an email verification token.
+    """
+    permission_classes = [AllowAny]
+    
+    def post(self, request):
+        uidb64 = request.data.get('uid')
+        token = request.data.get('token')
+        
+        if not uidb64 or not token:
+            return Response({"detail": "Missing uid or token."}, status=status.HTTP_400_BAD_REQUEST)
+            
+        try:
+            uid = force_str(urlsafe_base64_decode(uidb64))
+            user = CustomUser.objects.get(pk=uid)
+        except (TypeError, ValueError, OverflowError, CustomUser.DoesNotExist):
+            return Response({"detail": "Invalid verification link."}, status=status.HTTP_400_BAD_REQUEST)
+            
+        if default_token_generator.check_token(user, token):
+            user.is_email_verified = True
+            user.save()
+            return Response({"detail": "Email verified successfully."})
+        else:
+            return Response({"detail": "Invalid or expired verification link."}, status=status.HTTP_400_BAD_REQUEST)
+
+
+class ResendVerificationView(APIView):
+    """
+    POST /api/v1/auth/resend-verification/
+    Triggers resending the verification email to the authenticated user's email address.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        user = request.user
+        if not isinstance(user, CustomUser):
+            return Response({'detail': 'Service accounts cannot request verification.'}, status=status.HTTP_403_FORBIDDEN)
+
+        if user.is_email_verified:
+            return Response({'detail': 'Email already verified.'}, status=status.HTTP_200_OK)
+
+        success = send_verification_email(user)
+        if success:
+            return Response({'detail': 'Verification email sent.'}, status=status.HTTP_200_OK)
+        else:
+            return Response({'detail': 'Failed to send verification email.'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+class PhoneRequestView(APIView):
+    """
+    POST /api/v1/auth/phone/request/
+    Request a verification code to be sent to the user's phone number.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        user = request.user
+        if not isinstance(user, CustomUser):
+            return Response({'detail': 'Service accounts cannot request phone verification.'}, status=status.HTTP_403_FORBIDDEN)
+
+        phone = request.data.get('phone') or user.phone_number
+        if not phone:
+            return Response({'detail': 'Phone number required.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Create a 6-digit code
+        import random
+        code = f"{random.randint(0, 999999):06d}"
+
+        otp = PhoneOTP.objects.create(user=user, code=code)
+
+        # Send via SMS util (mocked)
+        message = f"Your Posture verification code is: {code}"
+        ok, detail = send_sms(phone, message)
+        if ok:
+            return Response({'detail': 'Verification code sent.'}, status=status.HTTP_200_OK)
+        else:
+            return Response({'detail': f'Failed to send SMS: {detail}'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+class PhoneVerifyView(APIView):
+    """
+    POST /api/v1/auth/phone/verify/
+    Redeems a verification code and marks the user's phone as verified.
+    Request body: { "code": "123456" }
+    """
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        user = request.user
+        if not isinstance(user, CustomUser):
+            return Response({'detail': 'Service accounts cannot verify phone.'}, status=status.HTTP_403_FORBIDDEN)
+
+        code = request.data.get('code')
+        if not code:
+            return Response({'detail': 'Code is required.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Find latest unused OTP for this user
+        otp = PhoneOTP.objects.filter(user=user, used=False).order_by('-created_at').first()
+        if not otp:
+            return Response({'detail': 'No verification code found. Request a new code.'}, status=status.HTTP_404_NOT_FOUND)
+
+        # Expire after 10 minutes
+        if timezone.now() - otp.created_at > timedelta(minutes=10):
+            return Response({'detail': 'Verification code expired.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        otp.attempts += 1
+        otp.save(update_fields=['attempts'])
+
+        if otp.code != code:
+            return Response({'detail': 'Invalid verification code.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        otp.used = True
+        otp.save(update_fields=['used'])
+
+        user.is_phone_verified = True
+        user.save(update_fields=['is_phone_verified'])
+
+        return Response({'detail': 'Phone verified successfully.'}, status=status.HTTP_200_OK)
+
+
+class AdWatchView(APIView):
+    """
+    POST /api/v1/ads/watch/
+    Client reports an ad watch completion. In the MVP we accept the client event
+    as validated (mock). Production should verify provider-signed tokens or
+    provider webhook callbacks.
+    """
+    permission_classes = [IsAuthenticated]
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = 'ads_watch'
+
+    def post(self, request):
+        user = request.user
+        if not isinstance(user, CustomUser):
+            return Response({'detail': 'Service accounts cannot watch ads.'}, status=status.HTTP_403_FORBIDDEN)
+
+        provider = request.data.get('provider', 'mock')
+        ad_id = request.data.get('ad_id')
+
+        # In the mock MVP we mark validated=True immediately
+        watch = AdWatch.objects.create(
+            user=user,
+            provider=provider,
+            ad_id=ad_id,
+            validated=True,
+            ip_address=request.META.get('REMOTE_ADDR'),
+            user_agent=request.META.get('HTTP_USER_AGENT', '')[:512]
+        )
+
+        # Determine if user should receive rewards: 1 reward per 5 validated watches
+        total_validated = AdWatch.objects.filter(user=user, validated=True).count()
+        credits_given = AdRewardGrant.objects.filter(user=user, grant_type=AdRewardGrant.GrantType.CREDIT).count()
+
+        rewards = []
+        # If total_validated >= (credits_given + 1) * 5, grant a new reward
+        if total_validated >= (credits_given + 1) * 5:
+            # Grant 1 hour credit
+            credit = AdRewardGrant.objects.create(
+                user=user,
+                grant_type=AdRewardGrant.GrantType.CREDIT,
+                amount_seconds=3600,
+                source='ads',
+                expires_at=timezone.now() + timedelta(days=30)
+            )
+            rewards.append({'type': 'CREDIT', 'amount_seconds': 3600})
+
+            # Grant an AI access use
+            ai = AdRewardGrant.objects.create(
+                user=user,
+                grant_type=AdRewardGrant.GrantType.AI_ACCESS,
+                uses=1,
+                source='ads',
+                expires_at=timezone.now() + timedelta(days=7)
+            )
+            rewards.append({'type': 'AI_ACCESS', 'uses': 1})
+
+        return Response({'status': 'ok', 'rewards': rewards}, status=status.HTTP_200_OK)
+
+
+class AdStatusView(APIView):
+    """GET /api/v1/ads/status/ — returns counts and available rewards."""
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        user = request.user
+        total_validated = AdWatch.objects.filter(user=user, validated=True).count()
+        credits = AdRewardGrant.objects.filter(user=user, grant_type=AdRewardGrant.GrantType.CREDIT)
+        total_credits_seconds = sum([c.amount_seconds or 0 for c in credits])
+        ai_access = AdRewardGrant.objects.filter(user=user, grant_type=AdRewardGrant.GrantType.AI_ACCESS)
+        ai_uses = sum([a.uses for a in ai_access])
+
+        # Number of validated watches since last credit grant
+        credits_given = credits.count()
+        watched_since = total_validated - (credits_given * 5)
+
+        return Response({
+            'total_validated_watches': total_validated,
+            'watched_since_last_reward': watched_since,
+            'credits_seconds': total_credits_seconds,
+            'ai_uses': ai_uses,
+        })
+
 
 class JoinOrganizationView(APIView):
     """
@@ -603,10 +939,16 @@ class JoinOrganizationView(APIView):
         # Check seat capacity
         current_members = org.users.count()
         if current_members >= org.max_seats:
-            # Simulate notifying the org admins
-            print(f"\n[SYSTEM ALERT] Organization '{org.name}' has reached its maximum capacity of {org.max_seats} seats.")
-            print(f"User {user.email} attempted to join but was rejected.")
-            print("Action Required: Please upgrade your subscription tier or remove inactive members.\n")
+            # Send Notification to Admin
+            admin_user = org.users.filter(role=CustomUser.Role.ADMIN).first()
+            if admin_user:
+                send_billing_email(admin_user, 'member_pending', {
+                    'admin_name': admin_user.first_name or admin_user.username,
+                    'org_name': org.name,
+                    'member_name': user.first_name or user.username,
+                    'member_email': user.email,
+                    'max_seats': org.max_seats
+                })
             
             return Response({
                 "error": "This organization has reached its maximum seat capacity.",
@@ -617,6 +959,16 @@ class JoinOrganizationView(APIView):
         user.organization = org
         user.role = CustomUser.Role.EMPLOYEE
         user.save()
+
+        # Send Notification to Admin
+        admin_user = org.users.filter(role=CustomUser.Role.ADMIN).first()
+        if admin_user:
+            send_billing_email(admin_user, 'member_joined', {
+                'admin_name': admin_user.first_name or admin_user.username,
+                'org_name': org.name,
+                'member_name': user.first_name or user.username,
+                'member_email': user.email
+            })
         
         return Response({
             "status": "success",
@@ -625,7 +977,8 @@ class JoinOrganizationView(APIView):
                 "id": str(org.id),
                 "name": org.name,
                 "is_active": org.is_active,
-                "has_subscription": bool(org.stripe_subscription_id)
+                "has_subscription": bool(org.razorpay_subscription_id),
+                "current_period_end": org.current_period_end
             }
         }, status=status.HTTP_200_OK)
 
@@ -662,8 +1015,9 @@ class OrganizationDetailView(APIView):
             "name": org.name,
             "invite_code": org.invite_code,
             "max_seats": org.max_seats,
-            "stripe_subscription_id": org.stripe_subscription_id,
-            "has_subscription": bool(org.stripe_subscription_id),
+            "razorpay_subscription_id": org.razorpay_subscription_id,
+            "has_subscription": bool(org.razorpay_subscription_id),
+            "current_period_end": org.current_period_end,
             "is_active": org.is_active,
             "users": users_data
         }, status=status.HTTP_200_OK)
@@ -684,23 +1038,20 @@ class OrganizationDetailView(APIView):
                 if new_max_seats < org.users.count():
                     return Response({"detail": "Cannot reduce seats below current active user count."}, status=status.HTTP_400_BAD_REQUEST)
                 
-                # Sync with Stripe if there's a real active subscription
-                if org.stripe_subscription_id and not org.stripe_subscription_id.startswith('sub_mock_'):
-                    import stripe
+                # Sync with Razorpay if there's a real active subscription
+                if org.razorpay_subscription_id and not org.razorpay_subscription_id.startswith('sub_mock_'):
+                    import razorpay
                     try:
-                        subscription = stripe.Subscription.retrieve(org.stripe_subscription_id)
-                        # Standard implementations assume the first line item is the per-seat base plan
-                        if subscription.get('items') and subscription['items'].get('data'):
-                            item_id = subscription['items']['data'][0]['id']
-                            stripe.SubscriptionItem.modify(
-                                item_id,
-                                quantity=new_max_seats,
-                                proration_behavior='always_invoice'
+                        client = razorpay.Client(auth=(getattr(settings, 'RAZORPAY_KEY_ID', ''), getattr(settings, 'RAZORPAY_KEY_SECRET', '')))
+                        subscription = client.subscription.fetch(org.razorpay_subscription_id)
+                        # Standard implementations assume modifying the quantity updates the plan
+                        if subscription.get('item'):
+                            client.subscription.update(
+                                org.razorpay_subscription_id,
+                                {"quantity": new_max_seats}
                             )
-                    except stripe.error.StripeError as e:
-                        return Response({"detail": f"Billing error: {str(e)}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
                     except Exception as e:
-                        return Response({"detail": f"Application error syncing billing: {str(e)}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+                        return Response({"detail": f"Billing error: {str(e)}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
                 org.max_seats = new_max_seats
                 org.save(update_fields=['max_seats'])
@@ -708,6 +1059,117 @@ class OrganizationDetailView(APIView):
                 return Response({"detail": "max_seats must be an integer."}, status=status.HTTP_400_BAD_REQUEST)
                 
         return Response({"status": "success", "max_seats": org.max_seats}, status=status.HTTP_200_OK)
+
+
+class OrganizationMemberManagementView(APIView):
+    """
+    PATCH /api/v1/orgs/me/members/<user_id>/
+    Admin-only endpoint for managing individual organization members.
+    Actions: promote, demote, remove.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def patch(self, request, user_id):
+        user = request.user
+        
+        # Verify the requester is an Admin
+        if not isinstance(user, CustomUser) or getattr(user, 'role', None) != CustomUser.Role.ADMIN:
+            return Response({"detail": "Admin access required."}, status=status.HTTP_403_FORBIDDEN)
+            
+        org = getattr(user, 'organization', None)
+        if not org:
+            return Response({"detail": "No organization associated."}, status=status.HTTP_403_FORBIDDEN)
+            
+        # Verify the target user exists and belongs to this organization
+        try:
+            target_user = CustomUser.objects.get(id=user_id, organization=org)
+        except CustomUser.DoesNotExist:
+            return Response({"detail": "Target user not found in your organization."}, status=status.HTTP_404_NOT_FOUND)
+            
+        action = request.data.get('action')
+        if action not in ['promote', 'demote', 'remove']:
+            return Response({"detail": "Invalid action. Use 'promote', 'demote', or 'remove'."}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Count admins to prevent leaving the 0 admins
+        admin_count = org.users.filter(role=CustomUser.Role.ADMIN).count()
+            
+        if action == 'promote':
+            if target_user.role == CustomUser.Role.ADMIN:
+                return Response({"detail": "User is already an Admin."}, status=status.HTTP_400_BAD_REQUEST)
+            target_user.role = CustomUser.Role.ADMIN
+            target_user.save(update_fields=['role'])
+            return Response({"status": "success", "message": f"{target_user.email} promoted to Admin."}, status=status.HTTP_200_OK)
+            
+        elif action == 'demote':
+            if target_user.role != CustomUser.Role.ADMIN:
+                return Response({"detail": "User is not an Admin."}, status=status.HTTP_400_BAD_REQUEST)
+            if admin_count <= 1:
+                return Response({"detail": "Cannot demote the last remaining Admin."}, status=status.HTTP_403_FORBIDDEN)
+            target_user.role = CustomUser.Role.EMPLOYEE
+            target_user.save(update_fields=['role'])
+            return Response({"status": "success", "message": f"{target_user.email} demoted to Employee."}, status=status.HTTP_200_OK)
+            
+        elif action == 'remove':
+            # Prevent removing the last admin
+            if target_user.role == CustomUser.Role.ADMIN and admin_count <= 1:
+                return Response({"detail": "Cannot remove the last remaining Admin. Promote another user first."}, status=status.HTTP_403_FORBIDDEN)
+                
+            # Detach the user from the organization and reset them to a solo user
+            # Provide them a fresh empty solo organization
+            new_org = Organization.objects.create(name=f"Solo - {target_user.email}", is_active=True)
+            target_user.organization = new_org
+            target_user.role = CustomUser.Role.SOLO
+            target_user.save(update_fields=['organization', 'role'])
+            
+            return Response({"status": "success", "message": f"{target_user.email} removed from organization."}, status=status.HTTP_200_OK)
+
+
+class OrganizationAddMemberView(APIView):
+    """
+    POST /api/v1/orgs/me/members/add/
+    Admin-only endpoint for adding a user to the organization by their User ID.
+    Expects payload: {"user_id": <int>}
+    """
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        user = request.user
+        
+        # Verify requester is an Admin
+        if not isinstance(user, CustomUser) or getattr(user, 'role', None) != CustomUser.Role.ADMIN:
+            return Response({"detail": "Admin access required."}, status=status.HTTP_403_FORBIDDEN)
+            
+        org = getattr(user, 'organization', None)
+        if not org:
+            return Response({"detail": "No organization associated."}, status=status.HTTP_403_FORBIDDEN)
+            
+        target_user_id = request.data.get('user_id')
+        if not target_user_id:
+            return Response({"detail": "User ID is required."}, status=status.HTTP_400_BAD_REQUEST)
+            
+        try:
+            target_user = CustomUser.objects.get(id=target_user_id)
+        except CustomUser.DoesNotExist:
+            return Response({"detail": "User not found."}, status=status.HTTP_404_NOT_FOUND)
+            
+        # Capacity check
+        current_members = org.users.count()
+        if current_members >= org.max_seats:
+            return Response({"detail": "Seat limit reached. Upgrade capacity first."}, status=status.HTTP_403_FORBIDDEN)
+            
+        # Prevent pulling members actively in other enterprise organizations
+        # For simplicity, if they have an org and its name does not start with "Solo -", they belong to someone else.
+        if target_user.organization and not target_user.organization.name.startswith("Solo -"):
+            return Response({"detail": "User belongs to another organization. They must leave it first."}, status=status.HTTP_400_BAD_REQUEST)
+            
+        if target_user.organization == org:
+            return Response({"detail": "User is already in this organization."}, status=status.HTTP_400_BAD_REQUEST)
+            
+        target_user.organization = org
+        target_user.role = CustomUser.Role.EMPLOYEE  # Give them basic permissions by default
+        target_user.save(update_fields=['organization', 'role'])
+        
+        return Response({"status": "success", "message": f"{target_user.email} was added as an Employee."}, status=status.HTTP_200_OK)
 
 
 class UpgradeToOrganizationView(APIView):
