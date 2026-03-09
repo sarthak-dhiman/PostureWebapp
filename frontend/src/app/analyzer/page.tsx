@@ -1,6 +1,7 @@
 "use client"
 import { useSession } from "next-auth/react"
 import { useRouter } from "next/navigation"
+import { useEffect } from "react" // Added useEffect import
 import { Download, ShieldCheck, Zap, Monitor, Cpu, Lock, ArrowRight } from "lucide-react"
 import { Button } from "@/components/ui/button"
 
@@ -8,12 +9,19 @@ export default function AnalyzerDownloadPage() {
     const { data: session, status } = useSession()
     const router = useRouter()
 
-    const handleDownload = () => {
+    // Moved redirect logic into a useEffect hook
+    useEffect(() => {
         if (status === "unauthenticated") {
             router.push("/login?callbackUrl=/analyzer")
-            return
         }
+    }, [status, router])
 
+    // If unauthenticated, prevent rendering the rest of the page until redirect happens
+    if (status === "unauthenticated") {
+        return null
+    }
+
+    const handleDownload = () => {
         // Mock download trigger
         alert("Preparing your download for Posture Analyzer v1.2.0 (Windows x64)...")
         // In a real scenario: window.location.href = "https://cdn.posturehub.com/analyzer-setup.exe"
@@ -138,12 +146,12 @@ export default function AnalyzerDownloadPage() {
 
             <style dangerouslySetInnerHTML={{
                 __html: `
-                @keyframes scan {
-                    0% { transform: translateY(0); }
-                    50% { transform: translateY(200px); }
-                    100% { transform: translateY(0); }
-                }
-            `}} />
+@keyframes scan {
+    0 % { transform: translateY(0); }
+    50 % { transform: translateY(200px); }
+    100 % { transform: translateY(0); }
+}
+`}} />
         </div>
     )
 }

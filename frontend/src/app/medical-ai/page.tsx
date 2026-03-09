@@ -1,24 +1,37 @@
 "use client"
-import { useSession } from "next-auth/react"
+import { useSubscription } from "@/hooks/useSubscription"
 import { useRouter } from "next/navigation"
+import { useEffect } from "react"
 import { HeartPulse, Stethoscope, Microscope, ShieldCheck, Activity, BrainCircuit, ArrowRight } from "lucide-react"
 import { Button } from "@/components/ui/button"
 
 export default function MedicalAIPage() {
-    const { data: session, status } = useSession()
+    const { sessionStatus, isLoading, hasSubscription, user, isAdmin, hasQuotaLeft, quota } = useSubscription()
     const router = useRouter()
 
-    const handleLaunch = () => {
-        if (status === "unauthenticated" || !session) {
-            router.push("/login?callbackUrl=/medical-ai")
-            return
+    useEffect(() => {
+        if (isLoading) return;
+
+        // Redirect logic based on session status and subscription
+        if (sessionStatus === "unauthenticated" || !user) {
+            router.push("/login?callbackUrl=/medical-ai");
+            return;
         }
 
-        const user = session.user as any
-        if (user.organization && !user.organization.hasSubscription) {
-            router.push("/settings?error=subscription_required&feature=medical-ai")
-            return
+        if (sessionStatus === "authenticated" && !hasSubscription && !isAdmin && !hasQuotaLeft) {
+            router.push("/settings?error=quota_exceeded&feature=medical-ai");
+            return;
         }
+    }, [sessionStatus, isLoading, hasSubscription, isAdmin, hasQuotaLeft, user, router]);
+
+    if (isLoading || sessionStatus === "unauthenticated" || !user || (!hasSubscription && !isAdmin && !hasQuotaLeft)) {
+        return null; // Prevents render flash while redirecting
+    }
+
+    const handleLaunch = () => {
+        // This button should only be clickable if the user is authenticated and has a subscription
+        // The useEffect above handles the initial redirects.
+        // If we reach here, it means the user is authenticated and has a subscription.
 
         // Redirect to the external Medical AI app
         window.location.href = "http://localhost:5173"
@@ -57,11 +70,23 @@ export default function MedicalAIPage() {
                                 <BrainCircuit className="w-5 h-5 group-hover:animate-pulse" />
                                 Launch Application
                             </Button>
-                            <div className="flex items-center gap-3 px-4 py-2 rounded-2xl border border-slate-200 bg-white/50 backdrop-blur">
-                                <div className="p-1.5 bg-green-100 rounded-lg">
-                                    <ShieldCheck className="w-4 h-4 text-green-600" />
+                            <div className="flex flex-col gap-2">
+                                <div className="flex items-center gap-3 px-4 py-2 rounded-2xl border border-slate-200 bg-white/50 backdrop-blur">
+                                    <div className="p-1.5 bg-green-100 rounded-lg">
+                                        <ShieldCheck className="w-4 h-4 text-green-600" />
+                                    </div>
+                                    <span className="text-xs font-medium text-slate-500">
+                                        {isAdmin || hasSubscription ? 'Enterprise Unlocked' : 'Free Tier Supported'}
+                                    </span>
                                 </div>
-                                <span className="text-xs font-medium text-slate-500">Pro & Enterprise Only</span>
+                                {!isAdmin && !hasSubscription && quota?.quota_remaining_hours !== undefined && (
+                                    <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl border border-blue-100 bg-blue-50/50 ml-2 mt-1 w-max">
+                                        <div className="w-2 h-2 rounded-full bg-blue-500 animate-pulse" />
+                                        <span className="text-[10px] font-bold text-blue-700 tracking-wider uppercase">
+                                            {quota.quota_remaining_hours} HRS QUOTA REMAINING
+                                        </span>
+                                    </div>
+                                )}
                             </div>
                         </div>
 

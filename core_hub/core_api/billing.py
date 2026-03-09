@@ -58,7 +58,7 @@ class CreateCheckoutSessionView(APIView):
                 line_items=[
                     {
                         'price': price_id,
-                        'quantity': 1,
+                        'quantity': user.organization.max_seats,
                     },
                 ],
                 mode='subscription',
@@ -247,6 +247,29 @@ class StripeWebhookView(APIView):
                 org = Organization.objects.get(stripe_subscription_id=subscription_id)
                 org.is_active = False
                 org.save(update_fields=['is_active'])
+            except Organization.DoesNotExist:
+                pass
+
+        elif event['type'] == 'customer.subscription.updated':
+            subscription = event['data']['object']
+            subscription_id = subscription.get('id')
+            try:
+                org = Organization.objects.get(stripe_subscription_id=subscription_id)
+                
+                # Sync quantity changes 
+                items = subscription.get('items', {}).get('data', [])
+                if items:
+                    quantity = items[0].get('quantity')
+                    if quantity is not None and quantity != org.max_seats:
+                        org.max_seats = quantity
+                        org.save(update_fields=['max_seats'])
+                
+                # Check cancellation or pause status
+                status_val = subscription.get('status')
+                is_active = status_val in ['active', 'trialing']
+                if org.is_active != is_active:
+                    org.is_active = is_active
+                    org.save(update_fields=['is_active'])
             except Organization.DoesNotExist:
                 pass
         

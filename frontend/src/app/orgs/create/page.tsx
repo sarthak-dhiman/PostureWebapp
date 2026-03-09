@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { useSession } from "next-auth/react"
 import { useRouter } from "next/navigation"
 import { Building, Users, Shield, ArrowRight, Loader2, CheckCircle2, AlertTriangle } from "lucide-react"
@@ -27,11 +27,15 @@ export default function CreateOrgPage() {
     }
 
     const user = session?.user as any
-    // Redirect if they are not SOLO
-    if (user && user.role !== "SOLO") {
-        router.push("/dashboard")
-        return null
-    }
+
+    // Redirect away from this page if user is not SOLO (already upgraded)
+    useEffect(() => {
+        if (user && user.role !== "SOLO") {
+            router.push("/dashboard")
+        }
+    }, [user, router])
+
+    if (user && user.role !== "SOLO") return null
 
     const handleUpgrade = async (e: React.FormEvent) => {
         e.preventDefault()

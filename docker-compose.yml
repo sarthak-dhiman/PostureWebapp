@@ -16,7 +16,7 @@ services:
     build:
       context: ./core_hub
       dockerfile: Dockerfile
-    command: gunicorn --bind 0.0.0.0:8000 core_hub.wsgi:application
+    command: daphne -b 0.0.0.0 -p 8000 core_hub.asgi:application
     volumes:
       - ./core_hub:/app
     environment:
@@ -29,6 +29,8 @@ services:
       - STRIPE_SECRET_KEY=sk_test_placeholder
       - STRIPE_WEBHOOK_SECRET=whsec_placeholder
       - FRONTEND_URL=http://localhost:3000
+      - GOOGLE_OAUTH_CLIENT_ID=${GOOGLE_OAUTH_CLIENT_ID:-815443716921-mnu1ram1pmmjf9nl5b6vc35rba7l0pgm.apps.googleusercontent.com}
+      - GOOGLE_OAUTH_CLIENT_SECRET=${GOOGLE_OAUTH_CLIENT_SECRET:-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}
     ports:
       - "8000:8000"
     depends_on:
@@ -166,14 +168,6 @@ services:
       - "4000:3000"
     environment:
       - GF_SECURITY_ADMIN_PASSWORD=admin
-
-  dp_celery_exporter:
-    image: danihodovic/celery-exporter
-    command: [ "--broker", "redis://dp_redis:6379/0" ]
-    ports:
-      - "9808:9808"
-    depends_on:
-      - dp_redis
 
 volumes:
   postgres_data:

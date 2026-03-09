@@ -1,7 +1,8 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { useSession, signOut } from "next-auth/react"
+import { useSubscription } from "@/hooks/useSubscription"
 import { useRouter } from "next/navigation"
 import { ShieldCheck, User, CreditCard, Clock, Activity, Loader2, LogOut, Settings, Users, Key, Building } from "lucide-react"
 import { Button } from "@/components/ui/button"
@@ -11,6 +12,7 @@ import { Badge } from "@/components/ui/badge"
 
 export default function ProfilePage() {
     const { data: session, status, update } = useSession()
+    const { hasSubscription, org: activeOrg, role } = useSubscription()
     const router = useRouter()
 
     const [inviteCode, setInviteCode] = useState("")
@@ -56,14 +58,19 @@ export default function ProfilePage() {
         )
     }
 
+    useEffect(() => {
+        if (status === "unauthenticated" || (status === "authenticated" && !session?.user)) {
+            router.push("/login?callbackUrl=/profile")
+        }
+    }, [status, session, router])
+
     if (status === "unauthenticated" || !session?.user) {
-        router.push("/login?callbackUrl=/profile")
         return null
     }
 
-    // Use our custom injected NextAuth session payload
+    // Use our custom injected NextAuth session payload for base user data
     const user = session.user as any
-    const org = user.organization
+    const org = activeOrg || user.organization
 
     return (
         <div className="min-h-screen bg-slate-50 pt-28 pb-20">
@@ -103,7 +110,7 @@ export default function ProfilePage() {
                                 <div className="space-y-4">
                                     <div className="flex justify-between items-center text-sm">
                                         <span className="text-slate-500">System Role</span>
-                                        <Badge variant="outline" className="bg-slate-50">{user.role || "USER"}</Badge>
+                                        <Badge variant="outline" className="bg-slate-50">{role || "USER"}</Badge>
                                     </div>
                                     <div className="flex justify-between items-center text-sm">
                                         <span className="text-slate-500">User ID</span>
@@ -166,24 +173,50 @@ export default function ProfilePage() {
                                         <Building className="w-5 h-5 text-violet-500" />
                                         <CardTitle>Organization Setup</CardTitle>
                                     </div>
-                                    <CardDescription>Upgrade to configure enterprise features for your workspace.</CardDescription>
+                                    <CardDescription>Upgrade to enterprise or join an existing organization.</CardDescription>
                                 </CardHeader>
-                                <CardContent>
-                                    <div className="p-8 text-center rounded-xl border border-violet-200 bg-violet-50/30 flex flex-col items-center justify-center">
-                                        <div className="bg-violet-100 w-16 h-16 rounded-full flex items-center justify-center mb-4 text-violet-600 shadow-inner border border-violet-200">
-                                            <Building className="w-8 h-8" />
+                                <CardContent className="space-y-6">
+                                    {/* Create org CTA */}
+                                    <div className="p-6 text-center rounded-xl border border-violet-200 bg-violet-50/30 flex flex-col items-center justify-center">
+                                        <div className="bg-violet-100 w-12 h-12 rounded-full flex items-center justify-center mb-3 text-violet-600 shadow-inner border border-violet-200">
+                                            <Building className="w-6 h-6" />
                                         </div>
-                                        <h3 className="text-xl font-bold text-slate-900">Upgrade to Enterprise</h3>
-                                        <p className="text-sm text-slate-600 mt-2 max-w-md mb-6 leading-relaxed">
-                                            Elevate your account to an Enterprise Organization to unlock tenant administration, bulk invites, and centralized CCTV management.
+                                        <h3 className="text-lg font-bold text-slate-900">Upgrade to Enterprise</h3>
+                                        <p className="text-sm text-slate-600 mt-1 mb-4 leading-relaxed">
+                                            Launch a tenant organization with centralized CCTV and admin controls.
                                         </p>
-                                        <Button size="lg" onClick={() => router.push('/orgs/create')} className="bg-gradient-to-r from-violet-600 to-indigo-600 text-white font-bold shadow-lg shadow-violet-500/30 w-full sm:w-auto px-8 h-12">
+                                        <Button size="sm" onClick={() => router.push('/orgs/create')} className="bg-gradient-to-r from-violet-600 to-indigo-600 text-white font-bold shadow-lg shadow-violet-500/30 px-6">
                                             Create Organization
                                         </Button>
+                                    </div>
+
+                                    {/* Divider */}
+                                    <div className="flex items-center gap-3">
+                                        <div className="flex-1 h-px bg-slate-200" />
+                                        <span className="text-xs text-slate-400 font-medium uppercase tracking-wider">or join one</span>
+                                        <div className="flex-1 h-px bg-slate-200" />
+                                    </div>
+
+                                    {/* Join org form */}
+                                    <div className="space-y-2">
+                                        <p className="text-sm font-medium text-slate-700">Have an invite code?</p>
+                                        <div className="flex gap-2">
+                                            <Input
+                                                placeholder="xxxx-xxxx-xxxx"
+                                                value={inviteCode}
+                                                onChange={e => setInviteCode(e.target.value)}
+                                                className="font-mono text-sm"
+                                            />
+                                            <Button variant="outline" onClick={handleJoinOrg} disabled={isJoining || !inviteCode.trim()}>
+                                                {isJoining ? "Joining..." : "Join"}
+                                            </Button>
+                                        </div>
+                                        {joinError && <p className="text-xs text-red-600 font-medium">{joinError}</p>}
                                     </div>
                                 </CardContent>
                             </Card>
                         )}
+
 
                         {user.role !== "SOLO" && (
                             <Card className="shadow-sm border-slate-200 relative overflow-hidden">
@@ -214,11 +247,11 @@ export default function ProfilePage() {
                                                     <div>
                                                         <p className="text-xs text-slate-500 font-bold uppercase tracking-wider mb-1">Current Plan</p>
                                                         <div className="flex items-center gap-3">
-                                                            <p className="text-xl font-black text-slate-900">
-                                                                {org.hasSubscription ? "Posture OS Pro" : "Free Trial / Basic"}
+                                                            <p className="font-semibold text-slate-800 text-lg">
+                                                                {hasSubscription ? "Posture OS Pro" : "Free Trial / Basic"}
                                                             </p>
-                                                            {org.hasSubscription && (
-                                                                <Badge className="bg-gradient-to-r from-violet-500 to-indigo-500 border-none text-white shadow-md shadow-violet-500/20">Premium</Badge>
+                                                            {hasSubscription && (
+                                                                <Badge variant="secondary" className="bg-emerald-100 text-emerald-700 hover:bg-emerald-100 uppercase text-[10px] font-bold tracking-wider">Active</Badge>
                                                             )}
                                                         </div>
                                                         <p className="text-sm text-slate-500 mt-2 flex items-center gap-2">

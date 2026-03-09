@@ -56,6 +56,21 @@ class CustomUser(AbstractUser):
         choices=Role.choices,
         default=Role.SOLO,
     )
+    monitoring_seconds_used = models.PositiveIntegerField(
+        default=0,
+        help_text="Total seconds of posture monitoring used (free tier cap: 36000s / 10hrs)."
+    )
+
+    FREE_TIER_QUOTA_SECONDS = 36_000  # 10 hours
+
+    def quota_remaining_seconds(self):
+        """Returns remaining free tier quota in seconds, or None if user has a paid plan."""
+        if self.role == self.Role.SOLO:
+            org = getattr(self, 'organization', None)
+            has_sub = org.has_subscription() if org and hasattr(org, 'has_subscription') else bool(getattr(org, 'stripe_subscription_id', None))
+            if not has_sub:
+                return max(0, self.FREE_TIER_QUOTA_SECONDS - self.monitoring_seconds_used)
+        return None  # Unlimited for paid / org users
 
     class Meta:
         verbose_name = 'User'
@@ -271,6 +286,61 @@ class GiftedSubscription(models.Model):
     def __str__(self):
         return f"Gift from {self.buyer.email} to {self.recipient_email} ({self.status})"
 
+class CCTVCamera(models.Model):
+    """
+    Represents a specific camera stream connected to an edge node.
+    """
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    service_account = models.ForeignKey(
+        ServiceAccount, 
+        on_delete=models.CASCADE, 
+        related_name='cameras'
+    )
+    uid = models.CharField(max_length=100, help_text="Client-side unique ID for the camera (e.g. cam_01)")
+    name = models.CharField(max_length=255)
+    room_type = models.CharField(max_length=100, default="General")
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ('service_account', 'uid')
+        verbose_name = 'CCTV Camera'
+        verbose_name_plural = 'CCTV Cameras'
+
+    def __str__(self):
+        return f"{self.name} ({self.service_account.name})"
+
+
+class CCTVViolation(models.Model):
+    """
+    Logs specific AI-detected violations (e.g. Slouching, No PPE).
+    """
+    class Severity(models.TextChoices):
+        LOW = 'LOW', 'Low'
+        MEDIUM = 'MEDIUM', 'Medium'
+        HIGH = 'HIGH', 'High'
+        CRITICAL = 'CRITICAL', 'Critical'
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    organization = models.ForeignKey(Organization, on_delete=models.CASCADE, related_name='cctv_violations')
+    camera = models.ForeignKey(CCTVCamera, on_delete=models.CASCADE, related_name='violations')
+    
+    violation_type = models.CharField(max_length=100) # e.g. "Bad Posture", "Unauthorized Access"
+    violator_name = models.CharField(max_length=255, blank=True, null=True)
+    severity = models.CharField(max_length=20, choices=Severity.choices, default=Severity.MEDIUM)
+    
+    snapshot_url = models.URLField(blank=True, null=True, help_text="Link to the captured frame if uploaded")
+    payload = models.JSONField(default=dict, help_text="Additional metadata about the violation")
+    
+    timestamp = models.DateTimeField(db_index=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-timestamp']
+        verbose_name = 'CCTV Violation'
+        verbose_name_plural = 'CCTV Violations'
+
+
 class CCTVTelemetry(models.Model):
     """
     Heartbeat and metrics log continuously pushed by CCTV edge nodes.
@@ -286,6 +356,10 @@ class CCTVTelemetry(models.Model):
     status = models.CharField(max_length=50, default="online")
     active_tracked_persons = models.IntegerField(default=0)
     current_fps = models.FloatField(default=0.0)
+    
+    # New: Detailed per-camera JSON payload
+    payload = models.JSONField(default=dict, help_text="Rich telemetry data including per-camera stats")
+    
     created_at = models.DateTimeField(auto_now_add=True, db_index=True)
 
     class Meta:
@@ -295,3 +369,4 @@ class CCTVTelemetry(models.Model):
 
     def __str__(self):
         return f"[{self.service_account.name}] {self.status} / {self.current_fps}fps @ {self.created_at}"
+

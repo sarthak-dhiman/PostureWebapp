@@ -1,20 +1,53 @@
 "use client"
-import { useSession } from "next-auth/react"
+import { useSubscription } from "@/hooks/useSubscription"
 import Link from "next/link"
-import { CreditCard, CheckCircle2, AlertTriangle, ExternalLink, Check } from "lucide-react"
+import { useRouter } from "next/navigation"
+import { useState } from "react"
+import { CreditCard, CheckCircle2, AlertTriangle, ExternalLink, Check, Loader2 } from "lucide-react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 
 export default function BillingPage() {
-    const { data: session, status } = useSession({ required: true })
-    const user = session?.user as any
+    const { sessionStatus, isLoading, user, org, hasSubscription: hasActiveSub, token } = useSubscription()
+    const router = useRouter()
+    const [isPortalLoading, setIsPortalLoading] = useState(false)
+    const [portalError, setPortalError] = useState<string | null>(null)
 
-    if (status === "loading" || !user) {
-        return <div className="p-8 text-muted-foreground animate-pulse">Loading subscription data...</div>
+    const handleCustomerPortal = async () => {
+        if (!hasActiveSub) {
+            router.push("/pricing")
+            return
+        }
+
+        setIsPortalLoading(true)
+        setPortalError(null)
+
+        try {
+            const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"}/api/v1/billing/customer-portal/`, {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                    "Authorization": `Bearer ${token}`
+                }
+            })
+
+            const data = await res.json()
+            if (!res.ok) throw new Error(data.detail || data.error || "Failed to create portal session")
+
+            if (data.url) {
+                window.location.href = data.url
+            } else {
+                throw new Error("No URL returned")
+            }
+        } catch (err: any) {
+            setPortalError(err.message)
+            setIsPortalLoading(false)
+        }
     }
 
-    const org = user.organization
-    const hasActiveSub = org?.hasSubscription
+    if (isLoading || sessionStatus === "loading" || !user) {
+        return <div className="p-8 text-muted-foreground animate-pulse">Loading subscription data...</div>
+    }
 
     return (
         <div className="container mx-auto p-6 max-w-4xl space-y-8">
@@ -68,13 +101,26 @@ export default function BillingPage() {
                             </ul>
                         </div>
                         <div className="flex flex-col items-start md:items-end justify-center">
-                            {/* In a real app, this would be a Stripe Portal redirect */}
-                            <Button className="w-full md:w-auto gap-2">
-                                <CreditCard className="w-4 h-4" />
-                                {hasActiveSub ? "Manage Customer Portal" : "Upgrade via Stripe"}
-                                <ExternalLink className="w-3 h-3 opacity-50 ml-1" />
+                            <Button
+                                className="w-full md:w-auto gap-2 transition-all font-semibold"
+                                onClick={handleCustomerPortal}
+                                disabled={isPortalLoading}
+                            >
+                                {isPortalLoading ? (
+                                    <>
+                                        <Loader2 className="w-4 h-4 animate-spin" />
+                                        Handling Redirect...
+                                    </>
+                                ) : (
+                                    <>
+                                        <CreditCard className="w-4 h-4" />
+                                        {hasActiveSub ? "Manage Customer Portal" : "Upgrade via Stripe"}
+                                        <ExternalLink className="w-3 h-3 opacity-50 ml-1" />
+                                    </>
+                                )}
                             </Button>
-                            <p className="text-xs text-muted-foreground mt-2 md:text-right w-full">
+                            {portalError && <p className="text-red-500 text-xs mt-2">{portalError}</p>}
+                            <p className="text-xs text-muted-foreground mt-2 md:text-right w-full font-medium">
                                 Securely powered by Stripe Payments.
                             </p>
                         </div>

@@ -1,35 +1,44 @@
 "use client"
-import { useSession } from "next-auth/react"
+import { useSubscription } from "@/hooks/useSubscription"
 import { useRouter } from "next/navigation"
+import { useEffect } from "react"
 import { Download, Camera, ShieldCheck, Zap, Server, Activity, ArrowRight, LayoutDashboard } from "lucide-react"
 import { Button } from "@/components/ui/button"
 
 export default function CCTVProductPage() {
-    const { data: session, status } = useSession()
+    const { sessionStatus, isLoading, hasSubscription, user, isAdmin } = useSubscription()
     const router = useRouter()
 
-    const handleDownload = () => {
-        if (status === "unauthenticated" || !session) {
+    // Moved redirect logic into a useEffect for page-level access control
+    useEffect(() => {
+        if (isLoading) return // Do nothing while session is loading
+
+        if (sessionStatus === "unauthenticated" || !user) {
             router.push("/login?callbackUrl=/cctv")
             return
         }
 
-        const user = session.user as any
-        if (user.organization && !user.organization.hasSubscription && user.role !== "ADMIN") {
+        if (sessionStatus === "authenticated" && !hasSubscription && !isAdmin) {
             router.push("/settings?error=subscription_required&feature=cctv")
             return
         }
+    }, [sessionStatus, isLoading, hasSubscription, isAdmin, user, router])
 
-        // Mock download trigger
+    // Render nothing until authentication and authorization checks are complete
+    if (isLoading || sessionStatus === "unauthenticated" || !user || (!hasSubscription && !isAdmin)) {
+        return null
+    }
+
+    const handleDownload = () => {
+        // This function will only be called if the useEffect above has passed,
+        // meaning the user is authenticated and authorized.
         alert("Preparing your download for Posture CCTV Node v2.0.1 (Linux/Windows)...")
         // In a real scenario: window.location.href = "https://cdn.posturehub.com/cctv-node-setup.zip"
     }
 
     const handleDashboard = () => {
-        if (status === "unauthenticated" || !session) {
-            router.push("/login?callbackUrl=/dashboard")
-            return
-        }
+        // This function will only be called if the useEffect above has passed,
+        // meaning the user is authenticated and authorized.
         router.push("/dashboard")
     }
 

@@ -1,47 +1,57 @@
 "use client"
 
-import { useState, useEffect, Suspense } from "react"
-import { useSession } from "next-auth/react"
+import { useState, useEffect } from "react"
+import { useSubscription } from "@/hooks/useSubscription"
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
-import { useRouter, useSearchParams } from "next/navigation"
+import { useRouter } from "next/navigation"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Users, ShieldAlert, Loader2, Link as LinkIcon, Plus, Minus, Check, Copy, Camera } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import Link from "next/link"
 
 export default function DashboardPage() {
-    return (
-        <Suspense fallback={<div className="flex-1 flex items-center justify-center min-h-[50vh]"><Loader2 className="h-8 w-8 animate-spin text-primary" /></div>}>
-            <DashboardContent />
-        </Suspense>
-    )
-}
-
-function DashboardContent() {
-    const { data: session, status, update } = useSession({ required: true })
+    const { sessionStatus, isLoading, hasSubscription, org, isAdmin, user, token } = useSubscription()
     const router = useRouter()
-    const searchParams = useSearchParams()
     const queryClient = useQueryClient()
-    const [copied, setCopied] = useState(false)
-    const [sessionRefreshed, setSessionRefreshed] = useState(false)
+    const [copiedLink, setCopiedLink] = useState(false)
+    const [copiedCode, setCopiedCode] = useState(false)
+    const [inviteLink, setInviteLink] = useState('')
 
-    // Ensure type casting gets us our custom DjangoUser structure
-    const user = session?.user as any
-    const isAdmin = user?.role === "ADMIN"
+    // Read session_id from URL on client only
+    const [sessionId, setSessionId] = useState<string | null>(null)
+    useEffect(() => {
+        const params = new URLSearchParams(window.location.search)
+        setSessionId(params.get('session_id'))
+    }, [])
 
-    const fetchOrgData = async () => {
+    // Clear session_id if it exists to clean up URL
+    useEffect(() => {
+        if (sessionId && sessionStatus === 'authenticated') {
+            router.replace('/dashboard')
+            setSessionId(null)
+        }
+    }, [sessionId, sessionStatus, router])
+
+    // Fetch detailed Organization Data for Admin Dashboard (users, invite code, seats)
+    const fetchDetailedOrgData = async () => {
         const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"}/api/v1/orgs/me/`, {
-            headers: { Authorization: `Bearer ${user.accessToken}` }
+            headers: { Authorization: `Bearer ${token}` }
         })
-        if (!res.ok) throw new Error("Failed to fetch")
+        if (!res.ok) throw new Error("Failed to fetch organization details")
         return res.json()
     }
 
-    const { data: orgData, isLoading } = useQuery({
-        queryKey: ["orgDashboard"],
-        queryFn: fetchOrgData,
-        enabled: !!user?.accessToken && !!isAdmin
+    const { data: orgData, isLoading: isLoadingOrg } = useQuery({
+        queryKey: ["orgDashboard", org?.id],
+        queryFn: fetchDetailedOrgData,
+        enabled: !!token && !!isAdmin
     })
+
+    useEffect(() => {
+        if (typeof window !== 'undefined' && orgData?.invite_code) {
+            setInviteLink(`${window.location.origin}/signup?invite=${orgData.invite_code}`)
+        }
+    }, [orgData?.invite_code])
 
     const updateSeatsMutation = useMutation({
         mutationFn: async (newSeats: number) => {
@@ -49,7 +59,7 @@ function DashboardContent() {
                 method: "PATCH",
                 headers: {
                     "Content-Type": "application/json",
-                    Authorization: `Bearer ${user.accessToken}`
+                    Authorization: `Bearer ${token}`
                 },
                 body: JSON.stringify({ max_seats: newSeats })
             })
@@ -61,35 +71,23 @@ function DashboardContent() {
         },
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: ["orgDashboard"] })
+            queryClient.invalidateQueries({ queryKey: ["userProfile"] })
+            setPendingSeats(null)
         }
     })
 
-    // If we've just come back from checkout, force a session refresh to pick up the new role
+    // Redirect Solo users away from the admin dashboard — always.
     useEffect(() => {
-        const sessionId = searchParams.get('session_id')
-        if (sessionId && status === 'authenticated' && !sessionRefreshed) {
-            setSessionRefreshed(true)
-            update().then(() => {
-                // Clean the URL without a full reload
-                router.replace('/dashboard')
-            })
-        }
-    }, [searchParams, status, sessionRefreshed, update, router])
-
-    // Handle unauthorized redirect — only if NOT coming from checkout
-    useEffect(() => {
-        const sessionId = searchParams.get('session_id')
-        if (status === "authenticated" && !isAdmin && !sessionId) {
+        if (!isLoading && sessionStatus === "authenticated" && !isAdmin) {
             router.push('/profile')
         }
-    }, [status, isAdmin, router, searchParams])
+    }, [sessionStatus, isLoading, isAdmin, router])
 
-    const hasSessionId = searchParams.get('session_id')
-    if (status === "authenticated" && !isAdmin && !hasSessionId) {
+    if (sessionStatus === "authenticated" && !isAdmin) {
         return null
     }
 
-    if (status === "loading" || !user || isLoading) {
+    if (sessionStatus === "loading" || !user || isLoading) {
         return (
             <div className="flex-1 flex items-center justify-center min-h-[50vh]">
                 <Loader2 className="h-8 w-8 animate-spin text-primary" />
@@ -97,11 +95,8 @@ function DashboardContent() {
         )
     }
 
-    // Check local session OR the fresh orgData from the API
-    const hasActiveSubscription = user.organization?.hasSubscription || user.organization?.has_subscription || orgData?.has_subscription;
-
     // If organization has no subscription, show locked state
-    if (user.organization && !isLoading && orgData && !hasActiveSubscription) {
+    if (org && !isLoading && !hasSubscription) {
         return (
             <div className="container mx-auto p-6 max-w-4xl pt-24">
                 <Card className="border-destructive/50 bg-destructive/5 shadow-2xl animate-in fade-in slide-in-from-bottom-4">
@@ -126,19 +121,22 @@ function DashboardContent() {
 
     const activeUsers = orgData?.users?.length || 0
     const maxSeats = orgData?.max_seats || 5
-    const [inviteLink, setInviteLink] = useState('')
 
-    useEffect(() => {
-        if (typeof window !== 'undefined' && orgData?.invite_code) {
-            setInviteLink(`${window.location.origin}/signup?invite=${orgData.invite_code}`)
-        }
-    }, [orgData?.invite_code])
-
-    const copyInvite = () => {
+    const copyInviteLink = () => {
         navigator.clipboard.writeText(inviteLink)
-        setCopied(true)
-        setTimeout(() => setCopied(false), 2000)
+        setCopiedLink(true)
+        setTimeout(() => setCopiedLink(false), 2000)
     }
+
+    const copyInviteCode = () => {
+        if (orgData?.invite_code) {
+            navigator.clipboard.writeText(orgData.invite_code)
+            setCopiedCode(true)
+            setTimeout(() => setCopiedCode(false), 2000)
+        }
+    }
+
+    const [pendingSeats, setPendingSeats] = useState<number | null>(null)
 
     const changeSeats = (delta: number) => {
         const newTotal = maxSeats + delta
@@ -146,16 +144,42 @@ function DashboardContent() {
             alert("Cannot reduce total seats below current active user count.")
             return
         }
-        updateSeatsMutation.mutate(newTotal)
+        setPendingSeats(newTotal)
     }
 
     return (
         <div className="container mx-auto p-6 pt-24 space-y-8 animate-in fade-in duration-500 max-w-7xl">
+            {/* Modal Overlay */}
+            {pendingSeats !== null && (
+                <div className="fixed inset-0 z-[100] bg-slate-900/50 backdrop-blur-sm flex items-center justify-center p-4">
+                    <Card className="w-full max-w-md shadow-2xl animate-in zoom-in-95 duration-200">
+                        <CardHeader>
+                            <CardTitle className="text-xl">Confirm Capacity Change</CardTitle>
+                            <CardDescription>
+                                You are changing your organization's seat limit from <span className="font-bold">{maxSeats}</span> to <span className="font-bold">{pendingSeats}</span>.
+                            </CardDescription>
+                        </CardHeader>
+                        <CardContent className="space-y-4">
+                            <div className="text-sm text-slate-700 bg-amber-50 border border-amber-200 p-4 rounded-xl flex gap-3 shadow-sm">
+                                <ShieldAlert className="w-5 h-5 text-amber-500 shrink-0 mt-0.5" />
+                                <span className="leading-snug">This will immediately update your Stripe workspace and a prorated invoice will be generated. Do you wish to proceed?</span>
+                            </div>
+                            <div className="flex gap-3 justify-end pt-4 border-t border-slate-100">
+                                <Button variant="outline" onClick={() => setPendingSeats(null)} disabled={updateSeatsMutation.isPending} className="font-bold">Cancel</Button>
+                                <Button onClick={() => updateSeatsMutation.mutate(pendingSeats)} className="bg-violet-600 hover:bg-violet-700 text-white font-bold" disabled={updateSeatsMutation.isPending}>
+                                    {updateSeatsMutation.isPending ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : null}
+                                    Confirm Upgrade
+                                </Button>
+                            </div>
+                        </CardContent>
+                    </Card>
+                </div>
+            )}
             <div className="flex flex-col md:flex-row items-baseline justify-between gap-4">
                 <div>
                     <h1 className="text-4xl font-black tracking-tight text-slate-900">Admin Dashboard</h1>
                     <p className="text-lg text-slate-600 mt-2">
-                        Managing <span className="font-bold text-violet-600">{orgData?.name}</span> organization.
+                        Managing <span className="font-bold text-violet-600">{org?.name}</span> organization.
                     </p>
                 </div>
             </div>
@@ -169,22 +193,36 @@ function DashboardContent() {
                             <LinkIcon className="w-5 h-5 text-emerald-500" />
                             Invite Your Team
                         </CardTitle>
-                        <CardDescription>Share this link to let employees join your workspace.</CardDescription>
+                        <CardDescription>Share this link or code to let employees join your workspace.</CardDescription>
                     </CardHeader>
-                    <CardContent>
-                        <div className="flex bg-slate-100/80 p-1 rounded-lg border border-slate-200">
-                            <input
-                                readOnly
-                                value={inviteLink}
-                                className="bg-transparent border-none text-xs w-full px-3 py-2 text-slate-600 font-mono focus:outline-none"
-                            />
-                            <Button size="sm" variant="secondary" onClick={copyInvite} className="shrink-0 bg-white">
-                                {copied ? <Check className="w-4 h-4 text-emerald-500" /> : <Copy className="w-4 h-4 text-slate-500" />}
-                            </Button>
+                    <CardContent className="space-y-4">
+                        <div>
+                            <p className="text-xs font-semibold text-slate-500 mb-1">Invite Link</p>
+                            <div className="flex bg-slate-100/80 p-1 rounded-lg border border-slate-200">
+                                <input
+                                    readOnly
+                                    value={inviteLink}
+                                    className="bg-transparent border-none text-xs w-full px-3 py-2 text-slate-600 font-mono focus:outline-none"
+                                />
+                                <Button size="sm" variant="secondary" onClick={copyInviteLink} className="shrink-0 bg-white">
+                                    {copiedLink ? <Check className="w-4 h-4 text-emerald-500" /> : <Copy className="w-4 h-4 text-slate-500" />}
+                                </Button>
+                            </div>
                         </div>
-                        <p className="text-xs text-muted-foreground mt-3 text-center">
-                            Or share Code: <span className="font-mono font-bold text-slate-900">{orgData?.invite_code}</span>
-                        </p>
+
+                        <div>
+                            <p className="text-xs font-semibold text-slate-500 mb-1">Direct Invite Code</p>
+                            <div className="flex bg-slate-100/80 p-1 rounded-lg border border-slate-200">
+                                <input
+                                    readOnly
+                                    value={orgData?.invite_code || ''}
+                                    className="bg-transparent border-none text-xs w-full px-3 py-2 text-slate-900 font-bold font-mono focus:outline-none"
+                                />
+                                <Button size="sm" variant="secondary" onClick={copyInviteCode} className="shrink-0 bg-white">
+                                    {copiedCode ? <Check className="w-4 h-4 text-emerald-500" /> : <Copy className="w-4 h-4 text-slate-500" />}
+                                </Button>
+                            </div>
+                        </div>
                     </CardContent>
                 </Card>
 
@@ -244,8 +282,8 @@ function DashboardContent() {
                             </div>
                             <p className="text-xs text-rose-700 mt-2">No hardware nodes detected.</p>
                         </div>
-                        <Link href="/cctv" className="w-full">
-                            <Button variant="outline" className="w-full font-bold">Open Camera Gateway</Button>
+                        <Link href="/dashboard/cctv" className="w-full">
+                            <Button variant="outline" className="w-full font-bold shadow-sm">Open Camera Gateway</Button>
                         </Link>
                     </CardContent>
                 </Card>

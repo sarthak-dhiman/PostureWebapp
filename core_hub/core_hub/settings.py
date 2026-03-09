@@ -35,6 +35,7 @@ GOOGLE_OAUTH_REDIRECT_URI = env('GOOGLE_OAUTH_REDIRECT_URI', default='http://loc
 
 # ─── Application Definition ───────────────────────────────────────────────────
 INSTALLED_APPS = [
+    'daphne',
     'django.contrib.admin',
     'django.contrib.auth',
     'django.contrib.contenttypes',
@@ -45,6 +46,7 @@ INSTALLED_APPS = [
     # Third-party
     'rest_framework',
     'corsheaders',
+    'drf_spectacular',
 
     # Local
     'core_api',
@@ -81,6 +83,16 @@ TEMPLATES = [
 ]
 
 WSGI_APPLICATION = 'core_hub.wsgi.application'
+ASGI_APPLICATION = 'core_hub.asgi.application'
+
+# ─── Channels ────────────────────────────────────────────────────────────────
+# Use in-memory channel layer — both the edge agent and the browser connect
+# to the same Daphne process, so no external broker is needed for CCTV relay.
+CHANNEL_LAYERS = {
+    'default': {
+        'BACKEND': 'channels.layers.InMemoryChannelLayer',
+    },
+}
 
 # ─── Custom User Model ────────────────────────────────────────────────────────
 AUTH_USER_MODEL = 'core_api.CustomUser'
@@ -136,6 +148,16 @@ REST_FRAMEWORK = {
     'DEFAULT_RENDERER_CLASSES': [
         'rest_framework.renderers.JSONRenderer',
     ],
+    'DEFAULT_SCHEMA_CLASS': 'drf_spectacular.openapi.AutoSchema',
+}
+
+# ─── DRF Spectacular ────────────────────────────────────────────────────────
+SPECTACULAR_SETTINGS = {
+    'TITLE': 'Posture Webapp API',
+    'DESCRIPTION': 'Public API for Posture OS, Organization Management, and Camera Gateway.',
+    'VERSION': '1.0.0',
+    'SERVE_INCLUDE_SCHEMA': False,
+    'COMPONENT_SPLIT_REQUEST': True,
 }
 
 # ─── Simple JWT ───────────────────────────────────────────────────────────────

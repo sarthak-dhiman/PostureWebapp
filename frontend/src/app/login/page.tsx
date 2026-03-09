@@ -1,7 +1,7 @@
 "use client"
 
-import { useState } from "react"
-import { signIn } from "next-auth/react"
+import { useState, useEffect } from "react"
+import { signIn, useSession } from "next-auth/react"
 import { useRouter } from "next/navigation"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -10,10 +10,17 @@ import { ShieldCheck, Loader2, Activity, Users, Zap, CheckCircle2 } from "lucide
 
 export default function LoginPage() {
     const router = useRouter()
+    const { data: session, status } = useSession()
     const [username, setUsername] = useState("")
     const [password, setPassword] = useState("")
     const [error, setError] = useState("")
     const [loading, setLoading] = useState(false)
+
+    useEffect(() => {
+        if (status === "authenticated") {
+            router.push("/profile")
+        }
+    }, [status, router])
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault()
@@ -30,10 +37,8 @@ export default function LoginPage() {
             console.error("signIn returned error:", res.error, res)
             setError("Invalid username or password")
             setLoading(false)
-        } else {
-            router.push("/profile")
-            router.refresh()
         }
+        // No else block here, as redirect is handled by useEffect based on session status
     }
 
     return (

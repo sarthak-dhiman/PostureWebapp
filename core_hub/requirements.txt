@@ -7,3 +7,7 @@ stripe
 gunicorn
 whitenoise[brotli]
 django-cors-headers
+drf-spectacular
+channels
+daphne
+channels-redis

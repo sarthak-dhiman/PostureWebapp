@@ -66,9 +66,12 @@ def verify_view(request):
 def google_auth_start(request):
     """GET /v1/auth/google"""
     session_id = str(uuid.uuid4())
-    # Return a dummy URL that the desktop app opened to simulate the web flow
+    # Fix: Use the unified api/v1 prefix and the desktop-specific callback landing page
+    auth_url = f"http://127.0.0.1:8000/api/v1/auth/google/callback-desktop/?session={session_id}"
     return Response({
-        "auth_url": f"http://127.0.0.1:8000/api/v1/desktop/auth/google/callback?session={session_id}",
+        "url": auth_url,
+        "auth_url": auth_url,
+        "session": session_id,
         "session_id": session_id
     }, status=status.HTTP_200_OK)
 
@@ -103,9 +106,18 @@ def google_auth_complete(request):
 @permission_classes([AllowAny])
 def google_auth_poll(request):
     """GET /v1/auth/google/poll?session=<id>"""
-    # The desktop app polls this. We can just return "completed" immediately for the mock.
-    # In a real app we'd check a cache/db for the session status.
-    return Response({"status": "completed"}, status=status.HTTP_200_OK)
+    session_id = request.query_params.get('session', 'mock_session')
+    
+    # Mock a finalized payload to match production GoogleOAuthPollView behavior
+    # Status MUST be "done" for the app to pick it up.
+    return Response({
+        "status": "done", 
+        "token": "mock_desktop_jwt_token_123",
+        "user": {
+            "email": "desktop_user@example.com",
+            "id": 1
+        }
+    }, status=status.HTTP_200_OK)
 
 @api_view(['GET'])
 @permission_classes([AllowAny])

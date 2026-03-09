@@ -115,6 +115,9 @@ class UserProfileView(APIView):
                 'has_subscription': bool(user.organization.stripe_subscription_id)
             }
             
+        remaining = user.quota_remaining_seconds()
+        is_free = remaining is not None
+            
         return Response({
             'id': user.id,
             'username': user.username,
@@ -122,7 +125,14 @@ class UserProfileView(APIView):
             'first_name': user.first_name,
             'last_name': user.last_name,
             'role': user.role,
-            'organization': org_data
+            'organization': org_data,
+            'quota': {
+                'is_free_tier': is_free,
+                'quota_total_seconds': user.FREE_TIER_QUOTA_SECONDS if is_free else None,
+                'quota_used_seconds': user.monitoring_seconds_used if is_free else None,
+                'quota_remaining_seconds': remaining,
+                'quota_remaining_hours': round(remaining / 3600, 2) if remaining is not None else None,
+            }
         })
 
 from rest_framework_simplejwt.tokens import RefreshToken
@@ -177,7 +187,9 @@ class GoogleOAuthBeginView(APIView):
         
         return Response({
             "url": url,
-            "session": session_id
+            "auth_url": url,        # Synonym for desktop compatibility
+            "session": session_id,
+            "session_id": session_id # Synonym for desktop compatibility
         }, status=status.HTTP_200_OK)
 
     def post(self, request):
@@ -315,7 +327,14 @@ class GoogleOAuthWebVerifyView(APIView):
         client_id = getattr(settings, 'GOOGLE_OAUTH_CLIENT_ID', '')
         
         # Verify with Google's public tokeninfo endpoint
-        verify_res = requests.get(f"https://oauth2.googleapis.com/tokeninfo?id_token={token}")
+        try:
+            verify_res = requests.get(
+                f"https://oauth2.googleapis.com/tokeninfo?id_token={token}",
+                timeout=10 # 10 second timeout
+            )
+        except requests.exceptions.RequestException as e:
+            return Response({"error": f"Connection to Google failed: {str(e)}"}, status=504)
+            
         if not verify_res.ok:
             return Response({"error": "Invalid token from Google"}, status=400)
             
@@ -487,8 +506,9 @@ class UserRegistrationView(APIView):
         name = request.data.get('name')
         email = request.data.get('email')
         password = request.data.get('password')
-        account_type = request.data.get('account_type') # 'solo' or 'org'
+        account_type = request.data.get('account_type') # 'solo', 'org', or 'join'
         org_name = request.data.get('org_name')
+        invite_code = request.data.get('invite_code')
 
         if not email or not password or not account_type:
             return Response({"detail": "Missing required fields."}, status=status.HTTP_400_BAD_REQUEST)
@@ -501,6 +521,20 @@ class UserRegistrationView(APIView):
             # Create a private organization for the solo user
             org = Organization.objects.create(name=f"Solo - {name or email}")
             role = CustomUser.Role.SOLO
+        elif account_type == 'join':
+            # Joining an existing organization via invite code
+            if not invite_code:
+                return Response({"detail": "Invite code is required to join an organization."}, status=status.HTTP_400_BAD_REQUEST)
+            try:
+                org = Organization.objects.get(invite_code=invite_code)
+            except Organization.DoesNotExist:
+                return Response({"detail": "Invalid invite code."}, status=status.HTTP_400_BAD_REQUEST)
+            
+            # Check capacity
+            if org.users.count() >= org.max_seats:
+                return Response({"detail": "This organization has reached its maximum seat capacity."}, status=status.HTTP_403_FORBIDDEN)
+            
+            role = CustomUser.Role.EMPLOYEE
         else:
             # Org accounts require manual approval for now, but we create the user
             if not org_name:
@@ -649,6 +683,25 @@ class OrganizationDetailView(APIView):
                 new_max_seats = int(new_max_seats)
                 if new_max_seats < org.users.count():
                     return Response({"detail": "Cannot reduce seats below current active user count."}, status=status.HTTP_400_BAD_REQUEST)
+                
+                # Sync with Stripe if there's a real active subscription
+                if org.stripe_subscription_id and not org.stripe_subscription_id.startswith('sub_mock_'):
+                    import stripe
+                    try:
+                        subscription = stripe.Subscription.retrieve(org.stripe_subscription_id)
+                        # Standard implementations assume the first line item is the per-seat base plan
+                        if subscription.get('items') and subscription['items'].get('data'):
+                            item_id = subscription['items']['data'][0]['id']
+                            stripe.SubscriptionItem.modify(
+                                item_id,
+                                quantity=new_max_seats,
+                                proration_behavior='always_invoice'
+                            )
+                    except stripe.error.StripeError as e:
+                        return Response({"detail": f"Billing error: {str(e)}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+                    except Exception as e:
+                        return Response({"detail": f"Application error syncing billing: {str(e)}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
                 org.max_seats = new_max_seats
                 org.save(update_fields=['max_seats'])
             except ValueError:
@@ -711,5 +764,70 @@ class UpgradeToOrganizationView(APIView):
                 "role": user.role
             }
         }, status=status.HTTP_200_OK)
+
+
+class QuotaStatusView(APIView):
+    """
+    GET /api/v1/quota/
+    Returns the current free-tier monitoring quota for the authenticated user.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        user = request.user
+        if not isinstance(user, CustomUser):
+            return Response({"error": "Quota is not applicable for service accounts."}, status=status.HTTP_403_FORBIDDEN)
+
+        remaining = user.quota_remaining_seconds()
+        is_free = remaining is not None
+
+        return Response({
+            "is_free_tier": is_free,
+            "quota_total_seconds": user.FREE_TIER_QUOTA_SECONDS if is_free else None,
+            "quota_used_seconds": user.monitoring_seconds_used if is_free else None,
+            "quota_remaining_seconds": remaining,
+            "quota_remaining_hours": round(remaining / 3600, 2) if remaining is not None else None,
+        })
+
+
+class QuotaLogView(APIView):
+    """
+    POST /api/v1/quota/log/
+    Called by the desktop app when a monitoring session ends.
+    Body: { "duration_seconds": <int> }
+    """
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        user = request.user
+        if not isinstance(user, CustomUser):
+            return Response({"error": "Quota logging is not applicable for service accounts."}, status=status.HTTP_403_FORBIDDEN)
+
+        duration = request.data.get("duration_seconds")
+        if duration is None or not isinstance(duration, (int, float)) or duration < 0:
+            return Response({"error": "duration_seconds must be a non-negative number."}, status=status.HTTP_400_BAD_REQUEST)
+
+        duration = int(duration)
+
+        # Only track for free tier users
+        remaining_before = user.quota_remaining_seconds()
+        if remaining_before is not None:
+            # Cap so we don't exceed the quota
+            actual_duration = min(duration, remaining_before)
+            user.monitoring_seconds_used += actual_duration
+            user.save(update_fields=["monitoring_seconds_used"])
+
+        remaining = user.quota_remaining_seconds()
+        is_free = remaining is not None
+
+        return Response({
+            "status": "logged",
+            "is_free_tier": is_free,
+            "quota_total_seconds": user.FREE_TIER_QUOTA_SECONDS if is_free else None,
+            "quota_used_seconds": user.monitoring_seconds_used if is_free else None,
+            "quota_remaining_seconds": remaining,
+            "quota_remaining_hours": round(remaining / 3600, 2) if remaining is not None else None,
+        }, status=status.HTTP_200_OK)
+
 
 
