@@ -16,94 +16,114 @@ interface DjangoUser extends User {
   };
 }
 
-export const authOptions: AuthOptions = {
-  secret: process.env.NEXTAUTH_SECRET,
-  providers: [
-    CredentialsProvider({
-      name: "Credentials",
-      credentials: {
-        username: { label: "Username", type: "text" },
-        password: { label: "Password", type: "password" },
-        "cf-turnstile-response": { label: "Captcha", type: "text" }
-      },
-      async authorize(credentials) {
-        console.log("AUTHORIZE START for", credentials?.username);
-        if (!credentials?.username || !credentials?.password) {
-          console.log("Missing credentials");
+const backendBaseUrl =
+  process.env.INTERNAL_API_URL ||
+  process.env.API_URL ||
+  process.env.NEXT_PUBLIC_API_URL ||
+  "http://127.0.0.1:8000";
+
+const googleClientId =
+  process.env.GOOGLE_OAUTH_CLIENT_ID || process.env.GOOGLE_CLIENT_ID || "";
+const googleClientSecret =
+  process.env.GOOGLE_OAUTH_CLIENT_SECRET || process.env.GOOGLE_CLIENT_SECRET || "";
+
+const providers: AuthOptions["providers"] = [
+  CredentialsProvider({
+    name: "Credentials",
+    credentials: {
+      username: { label: "Username", type: "text" },
+      password: { label: "Password", type: "password" },
+      "cf-turnstile-response": { label: "Captcha", type: "text" }
+    },
+    async authorize(credentials) {
+      console.log("AUTHORIZE START for", credentials?.username);
+      if (!credentials?.username || !credentials?.password) {
+        console.log("Missing credentials");
+        return null;
+      }
+
+      try {
+        console.log("Using API_URL:", backendBaseUrl);
+
+        // Build the payload mapping credentials exactly to what DRF expects
+        const payload: any = {
+          username: credentials?.username,
+          password: credentials?.password,
+        }
+        if (credentials?.["cf-turnstile-response"]) {
+          payload["cf-turnstile-response"] = credentials["cf-turnstile-response"]
+        }
+
+        const tokenRes = await apiFetch(`${backendBaseUrl}/api/v1/auth/token/`, {
+          method: 'POST',
+          body: JSON.stringify(payload),
+          headers: { "Content-Type": "application/json" }
+        });
+
+        console.log("Token response status:", tokenRes.status, "url:", `${backendBaseUrl}/api/v1/auth/token/`);
+        if (!tokenRes.ok) {
+          console.log("Token response NOT OK");
+          const errData = await tokenRes.json().catch(() => ({}));
+          // NextAuth catches this and sends the message string directly to res.error
+          throw new Error(errData.detail || "Invalid credentials");
+        }
+        const tokens = await tokenRes.json();
+        console.log("Token generated successfully");
+
+        const userRes = await fetch(`${backendBaseUrl}/api/v1/users/me/`, {
+          headers: {
+            "Authorization": `Bearer ${tokens.access}`
+          }
+        });
+
+        console.log("Profile response status:", userRes.status);
+        if (!userRes.ok) {
+          console.log("Profile response NOT OK");
           return null;
         }
+        const userProfile = await userRes.json();
+        console.log("Parsed profile:", JSON.stringify(userProfile));
 
-        try {
-          const baseUrl = process.env.API_URL || process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
-          console.log("Using API_URL:", baseUrl);
+        const user = {
+          id: userProfile.id.toString(),
+          name: `${userProfile.first_name} ${userProfile.last_name}`.trim() || userProfile.username,
+          email: userProfile.email,
+          accessToken: tokens.access,
+          refreshToken: tokens.refresh,
+          role: userProfile.role,
+          organization: userProfile.organization ? {
+            id: userProfile.organization.id,
+            name: userProfile.organization.name,
+            isActive: userProfile.organization.is_active,
+            hasSubscription: userProfile.organization.has_subscription
+          } : undefined
+        };
+        console.log("Returning mapped NextAuth user:", JSON.stringify(user));
+        return user;
 
-          // Build the payload mapping credentials exactly to what DRF expects
-          const payload: any = {
-            username: credentials?.username,
-            password: credentials?.password,
-          }
-          if (credentials?.["cf-turnstile-response"]) {
-            payload["cf-turnstile-response"] = credentials["cf-turnstile-response"]
-          }
-
-          const tokenRes = await apiFetch(`${baseUrl}/api/v1/auth/token/`, {
-            method: 'POST',
-            body: JSON.stringify(payload),
-            headers: { "Content-Type": "application/json" }
-          });
-
-          console.log("Token response status:", tokenRes.status, "url:", `${baseUrl}/api/v1/auth/token/`);
-          if (!tokenRes.ok) {
-            console.log("Token response NOT OK");
-            const errData = await tokenRes.json().catch(() => ({}));
-            // NextAuth catches this and sends the message string directly to res.error
-            throw new Error(errData.detail || "Invalid credentials");
-          }
-          const tokens = await tokenRes.json();
-          console.log("Token generated successfully");
-
-          const userRes = await fetch(`${baseUrl}/api/v1/users/me/`, {
-            headers: {
-              "Authorization": `Bearer ${tokens.access}`
-            }
-          });
-
-          console.log("Profile response status:", userRes.status);
-          if (!userRes.ok) {
-            console.log("Profile response NOT OK");
-            return null;
-          }
-          const userProfile = await userRes.json();
-          console.log("Parsed profile:", JSON.stringify(userProfile));
-
-          const user = {
-            id: userProfile.id.toString(),
-            name: `${userProfile.first_name} ${userProfile.last_name}`.trim() || userProfile.username,
-            email: userProfile.email,
-            accessToken: tokens.access,
-            refreshToken: tokens.refresh,
-            role: userProfile.role,
-            organization: userProfile.organization ? {
-              id: userProfile.organization.id,
-              name: userProfile.organization.name,
-              isActive: userProfile.organization.is_active,
-              hasSubscription: userProfile.organization.has_subscription
-            } : undefined
-          };
-          console.log("Returning mapped NextAuth user:", JSON.stringify(user));
-          return user;
-
-        } catch (e: any) {
-          console.error("Auth error catch block:", e);
-          throw new Error(e.message || "Authentication failed");
-        }
+      } catch (e: any) {
+        console.error("Auth error catch block:", e);
+        throw new Error(e.message || "Authentication failed");
       }
-    }),
+    }
+  }),
+];
+
+if (googleClientId && googleClientSecret) {
+  providers.push(
     GoogleProvider({
-      clientId: process.env.GOOGLE_OAUTH_CLIENT_ID || process.env.GOOGLE_CLIENT_ID || "",
-      clientSecret: process.env.GOOGLE_OAUTH_CLIENT_SECRET || process.env.GOOGLE_CLIENT_SECRET || "",
+      clientId: googleClientId,
+      clientSecret: googleClientSecret,
     })
-  ],
+  );
+} else {
+  console.warn("Google OAuth provider is disabled: missing GOOGLE_OAUTH_CLIENT_ID/SECRET.");
+}
+
+export const authOptions: AuthOptions = {
+  // Allow single-service deployments to reuse Django SECRET_KEY if NEXTAUTH_SECRET is omitted.
+  secret: process.env.NEXTAUTH_SECRET || process.env.SECRET_KEY,
+  providers,
   callbacks: {
     async jwt({ token, user, account, trigger, session }: { token: any, user: any, account?: any, trigger?: string, session?: any }) {
       console.log("JWT callback START. User present:", !!user, "Account present:", !!account);
@@ -119,8 +139,7 @@ export const authOptions: AuthOptions = {
       if (account?.provider === 'google' && account.id_token) {
         console.log("Exchanging Google id_token with Django backend...");
         try {
-          const baseUrl = process.env.API_URL || process.env.NEXT_PUBLIC_API_URL || "http://backend:8000"
-          const res = await fetch(`${baseUrl}/api/v1/auth/google/verify/`, {
+          const res = await fetch(`${backendBaseUrl}/api/v1/auth/google/verify/`, {
             method: 'POST',
             body: JSON.stringify({ id_token: account.id_token }),
             headers: { "Content-Type": "application/json" }
