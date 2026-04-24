@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query'
 import { useSession } from 'next-auth/react'
-import { apiFetch } from '@/lib/api'
+import { apiFetch, getApiUrl } from '@/lib/api'
 
 export function useSubscription() {
     const { data: session, status } = useSession()
@@ -9,7 +9,8 @@ export function useSubscription() {
 
     const fetchUserProfile = async () => {
         if (!token) return null
-        const res = await apiFetch(`${process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"}/api/v1/users/me/`, {
+        const res = await apiFetch(getApiUrl('/api/v1/users/me/'), {
+            method: "GET",
             headers: { Authorization: `Bearer ${token}` }
         })
         if (!res.ok) throw new Error("Failed to fetch user profile")

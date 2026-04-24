@@ -5,8 +5,7 @@ import { useSession } from "next-auth/react"
 import { useRouter } from "next/navigation"
 import { Loader2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
-import { apiFetch } from "@/lib/api"
-import { MockPaymentModal } from "./mock-payment-modal"
+import { apiFetch, getApiUrl } from "@/lib/api"
 
 interface SubscribeButtonProps {
     planId: string
@@ -23,7 +22,6 @@ export function SubscribeButton({ planId, planName, className = "", buttonText =
     const [isLoading, setIsLoading] = useState(false)
     const [error, setError] = useState<string | null>(null)
     const [razorpayScriptLoaded, setRazorpayScriptLoaded] = useState(false)
-    const [mockModal, setMockModal] = useState<{ isOpen: boolean, subscriptionId?: string }>({ isOpen: false })
 
     // Dynamically inject the Razorpay checkout script
     useEffect(() => {
@@ -65,7 +63,7 @@ export function SubscribeButton({ planId, planName, className = "", buttonText =
 
         try {
             // Step 1: Tell the backend to create a Razorpay Subscription
-            const res = await apiFetch(`${process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"}/api/v1/billing/checkout/`, {
+            const res = await apiFetch(getApiUrl('/api/v1/billing/checkout/'), {
                 method: "POST",
                 headers: {
                     "Content-Type": "application/json",
@@ -84,15 +82,21 @@ export function SubscribeButton({ planId, planName, className = "", buttonText =
                 throw new Error("No subscription ID returned from server")
             }
 
-            // If the backend bypassed Razorpay (missing keys), it might return a mock ID.
-            if (data.subscription_id.startsWith('sub_mock_')) {
-                setMockModal({ isOpen: true, subscriptionId: data.subscription_id })
+            // Dev/mock: backend returns sub_mock_* when keys are missing or placeholder.
+            // Opening Razorpay with a fake subscription_id always fails.
+            if (String(data.subscription_id).startsWith("sub_mock_")) {
+                router.push(`/dashboard?subscription_id=${encodeURIComponent(data.subscription_id)}&status=success`)
                 return
+            }
+
+            const pubKey = process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID || ""
+            if (!pubKey) {
+                throw new Error("Payment is not configured (missing NEXT_PUBLIC_RAZORPAY_KEY_ID).")
             }
 
             // Step 2: Initialize Razorpay Checkout inline modal
             const options = {
-                key: process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID || "",
+                key: pubKey,
                 subscription_id: data.subscription_id,
                 name: "Posture OS",
                 description: `${planName} Subscription`,
@@ -150,13 +154,7 @@ export function SubscribeButton({ planId, planName, className = "", buttonText =
                 </p>
             )}
 
-            <MockPaymentModal
-                isOpen={mockModal.isOpen}
-                onClose={() => setMockModal({ isOpen: false })}
-                planName={planName}
-                subscriptionId={mockModal.subscriptionId}
-                token={(session as any)?.user?.accessToken || (session as any)?.accessToken}
-            />
+
         </div>
     )
 }

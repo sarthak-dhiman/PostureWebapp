@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react"
 import { Loader2, X, ShieldCheck, CreditCard, AlertTriangle } from "lucide-react"
 import { Button } from "@/components/ui/button"
-import { apiFetch } from "@/lib/api"
+import { apiFetch, getApiUrl } from "@/lib/api"
 import { useRouter } from "next/navigation"
 
 interface MockPaymentModalProps {
@@ -36,7 +36,7 @@ export function MockPaymentModal({ isOpen, onClose, planName, subscriptionId, or
         setError(null)
 
         try {
-            const res = await apiFetch(`${process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"}/api/v1/billing/mock-success/`, {
+            const res = await apiFetch(getApiUrl('/api/v1/billing/mock-success/'), {
                 method: "POST",
                 headers: {
                     "Content-Type": "application/json",

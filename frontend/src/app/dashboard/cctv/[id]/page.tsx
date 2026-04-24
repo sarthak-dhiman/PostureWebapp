@@ -15,7 +15,7 @@ import {
     ChevronLeft, AlertTriangle, Users, Play, Clock, MapPin, AlertCircle
 } from "lucide-react"
 import { CCTVStreamModal } from "@/components/ui/cctv-stream-modal"
-import { apiFetch } from "@/lib/api"
+import { apiFetch, getApiUrl } from "@/lib/api"
 
 export default function NodeDetailPage() {
     const { id } = useParams()
@@ -30,7 +30,7 @@ export default function NodeDetailPage() {
     const { data, isLoading, error } = useQuery({
         queryKey: ['cctv-node-detail', id],
         queryFn: async () => {
-            const resp = await apiFetch(`${process.env.NEXT_PUBLIC_API_URL}/api/v1/cctv/nodes/${id}/`, {
+            const resp = await apiFetch(getApiUrl(`/api/v1/cctv/nodes/${id}/`), {
                 headers: { 'Authorization': `Bearer ${token}` }
             })
             if (!resp.ok) throw new Error("Failed to fetch node details")

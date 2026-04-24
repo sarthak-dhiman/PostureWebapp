@@ -45,10 +45,15 @@ def login_view(request):
     
     return Response({
         "token": str(refresh.access_token),
+        "email": user.email,
+        "role": user.role,
+        "is_admin": user.is_superuser or user.role == 'ADMIN',
+        "is_staff": user.is_staff,
         "user": {
             "id": user.id,
             "email": user.email,
-            "name": f"{user.first_name} {user.last_name}".strip() or user.username
+            "name": f"{user.first_name} {user.last_name}".strip() or user.username,
+            "role": user.role
         },
         "subscription": {
             "is_active": user.organization.is_active if user.organization else False
@@ -99,7 +104,11 @@ def google_auth_complete(request):
     refresh = RefreshToken.for_user(user)
     return Response({
         "token": str(refresh.access_token),
-        "user": {"email": user.email, "id": user.id}
+        "email": user.email,
+        "role": user.role,
+        "is_admin": user.is_superuser or user.role == 'ADMIN',
+        "is_staff": user.is_staff,
+        "user": {"email": user.email, "id": user.id, "role": user.role}
     }, status=status.HTTP_200_OK)
 
 @api_view(['GET'])
@@ -113,9 +122,14 @@ def google_auth_poll(request):
     return Response({
         "status": "done", 
         "token": "mock_desktop_jwt_token_123",
+        "email": "desktop_user@example.com",
+        "role": "ADMIN",
+        "is_admin": True,
+        "is_staff": True,
         "user": {
             "email": "desktop_user@example.com",
-            "id": 1
+            "id": 1,
+            "role": "ADMIN"
         }
     }, status=status.HTTP_200_OK)
 

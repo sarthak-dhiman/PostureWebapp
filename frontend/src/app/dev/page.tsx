@@ -39,19 +39,19 @@ export default function DevPortal() {
         }), [token]);
 
     const fetchMetrics = useCallback(async () => {
-        const res = await authFetch('/api/v1/dev/metrics/');
+        const res = await authFetch('/api/v1/dev/metrics');
         if (!res.ok) throw new Error(`${res.status}`);
         return res.json();
     }, [authFetch]);
 
     const fetchLogs = useCallback(async () => {
-        const res = await authFetch('/api/v1/dev/logs/?type=audit&limit=50');
+        const res = await authFetch('/api/v1/dev/logs?type=audit&limit=50');
         if (!res.ok) throw new Error(`${res.status}`);
         return res.json();
     }, [authFetch]);
 
     const fetchTickets = useCallback(async () => {
-        const res = await authFetch('/api/v1/dev/support/');
+        const res = await authFetch('/api/v1/dev/support');
         if (!res.ok) throw new Error(`${res.status}`);
         return res.json();
     }, [authFetch]);

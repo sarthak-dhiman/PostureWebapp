@@ -66,7 +66,7 @@ export default function SignupPage() {
       // Show success message so user checks email
       setSuccessMessage(
         regData.detail ||
-          "Registration successful! Please check your email to verify your account.",
+        "Registration successful! Please check your email to verify your account.",
       );
       setStep(5);
     } catch (err: any) {

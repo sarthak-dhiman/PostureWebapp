@@ -154,6 +154,10 @@ class UserProfileView(APIView):
             'email': user.email,
             'first_name': user.first_name,
             'last_name': user.last_name,
+            'is_staff': user.is_staff,
+            'is_superuser': user.is_superuser,
+            # Backwards-compatible convenience flag used by some clients
+            'is_admin': bool(user.is_superuser) or (user.role == CustomUser.Role.ADMIN),
             'role': user.role,
             'organization': org_data,
             'quota': {
@@ -400,6 +404,9 @@ class GoogleOAuthCallbackView(APIView):
             "expires_at": expires_at.isoformat(),
             "email": user.email,
             "name": f"{user.first_name} {user.last_name}".strip() or user.username,
+            "role": user.role,
+            "is_staff": user.is_staff,
+            "is_admin": user.is_superuser or user.role == 'ADMIN',
             "first_time": first_time,
             "subscription": {
                 "plan": "Solo",
@@ -491,7 +498,7 @@ class GoogleOAuthWebVerifyView(APIView):
                 'email': user.email,
                 'first_name': user.first_name,
                 'last_name': user.last_name,
-                'role': getattr(user, 'role', 'VIEWER'),
+                'role': user.role,
                 'organization': {
                     'id': getattr(user.organization, 'id', ''),
                     'name': getattr(user.organization, 'name', ''),
@@ -617,7 +624,18 @@ class FlexibleTokenObtainPairView(APIView):
             refresh = RefreshToken.for_user(user)
             return Response({
                 'access': str(refresh.access_token),
-                'refresh': str(refresh)
+                'refresh': str(refresh),
+                'email': user.email,
+                'name': f"{user.first_name} {user.last_name}".strip() or user.username,
+                'role': user.role,
+                'is_staff': user.is_staff,
+                'is_admin': user.is_superuser or user.role == 'ADMIN',
+                'user': {
+                    'id': user.id,
+                    'username': user.username,
+                    'email': user.email,
+                    'role': user.role,
+                }
             }, status=status.HTTP_200_OK)
             
         return Response({'detail': 'Invalid password'}, status=status.HTTP_401_UNAUTHORIZED)

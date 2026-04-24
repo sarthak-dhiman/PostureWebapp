@@ -9,7 +9,7 @@ import { Users, ShieldAlert, Loader2, Link as LinkIcon, Plus, Minus, Check, Copy
 import { Button } from "@/components/ui/button"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import Link from "next/link"
-import { apiFetch } from "@/lib/api"
+import { apiFetch, getApiUrl } from "@/lib/api"
 
 export default function DashboardPage() {
     const { sessionStatus, isLoading, hasSubscription, org, isAdmin, user, token, currentPeriodEnd } = useSubscription()
@@ -38,7 +38,7 @@ export default function DashboardPage() {
 
     // Fetch detailed Organization Data for Admin Dashboard (users, invite code, seats)
     const fetchDetailedOrgData = async () => {
-        const res = await apiFetch(`${process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"}/api/v1/orgs/me/`, {
+        const res = await apiFetch(getApiUrl(`/api/v1/orgs/me`), {
             headers: { Authorization: `Bearer ${token}` }
         })
         if (!res.ok) throw new Error("Failed to fetch organization details")
@@ -59,7 +59,7 @@ export default function DashboardPage() {
 
     const updateSeatsMutation = useMutation({
         mutationFn: async (newSeats: number) => {
-            const res = await apiFetch(`${process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"}/api/v1/orgs/me/`, {
+            const res = await apiFetch(getApiUrl(`/api/v1/orgs/me/`), {
                 method: "PATCH",
                 headers: {
                     "Content-Type": "application/json",
@@ -82,7 +82,7 @@ export default function DashboardPage() {
 
     const manageMemberMutation = useMutation({
         mutationFn: async ({ userId, action }: { userId: string, action: 'promote' | 'demote' | 'remove' }) => {
-            const res = await apiFetch(`${process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"}/api/v1/orgs/me/members/${userId}/`, {
+            const res = await apiFetch(getApiUrl(`/api/v1/orgs/me/members/${userId}/`), {
                 method: "PATCH",
                 headers: {
                     "Content-Type": "application/json",
@@ -106,7 +106,7 @@ export default function DashboardPage() {
 
     const addMemberMutation = useMutation({
         mutationFn: async (userIdToAdd: string) => {
-            const res = await apiFetch(`${process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"}/api/v1/orgs/me/members/add/`, {
+            const res = await apiFetch(getApiUrl(`/api/v1/orgs/me/members/add/`), {
                 method: "POST",
                 headers: {
                     "Content-Type": "application/json",

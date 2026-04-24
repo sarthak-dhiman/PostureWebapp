@@ -11,7 +11,7 @@ import {
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
-import { apiFetch } from "@/lib/api"
+import { apiFetch, getApiUrl } from "@/lib/api"
 
 const ROLE_LABELS: Record<string, { label: string; color: string }> = {
     SOLO: { label: "Solo User", color: "bg-blue-100 text-blue-700 border-blue-200" },
@@ -32,7 +32,7 @@ export default function SettingsPage() {
         setLoadingCheckout(true)
         setCheckoutError("")
         try {
-            const res = await apiFetch(`${process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"}/api/v1/billing/checkout/`, {
+            const res = await apiFetch(getApiUrl('/api/v1/billing/checkout/'), {
                 method: "POST",
                 headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` },
                 body: JSON.stringify({ plan_id: planId })
@@ -40,9 +40,16 @@ export default function SettingsPage() {
             const data = await res.json()
             if (!res.ok) throw new Error(data.detail || data.error || "Checkout failed")
             if (data.subscription_id) {
-                // Settings page fallback for admin subscribe button
+                if (String(data.subscription_id).startsWith("sub_mock_")) {
+                    window.location.reload()
+                    return
+                }
+                const pubKey = process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID || ""
+                if (!pubKey) {
+                    throw new Error("Payment is not configured (missing NEXT_PUBLIC_RAZORPAY_KEY_ID).")
+                }
                 const options = {
-                    key: process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID || "",
+                    key: pubKey,
                     subscription_id: data.subscription_id,
                     name: "Posture OS",
                     description: "Business Subscription",
@@ -67,7 +74,7 @@ export default function SettingsPage() {
         setLoadingPortal(true)
         setPortalError("")
         try {
-            const res = await apiFetch(`${process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"}/api/v1/billing/customer-portal/`, {
+            const res = await apiFetch(getApiUrl('/api/v1/billing/customer-portal/'), {
                 method: "POST",
                 headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` }
             })

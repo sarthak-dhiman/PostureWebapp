@@ -60,15 +60,32 @@ class CCTVNodeTelemetryView(APIView):
     
     def get_service_account(self, request):
         auth_header = request.headers.get('Authorization')
+        xdevice = request.headers.get('X-Device-Api-Key') or request.headers.get('X-Device-Apikey')
         print(f"[DEBUG AUTH] Incoming Header: {auth_header}")
-        
-        if not auth_header or not auth_header.startswith('Bearer '):
-            print("[DEBUG AUTH] No Bearer token found.")
+        if xdevice:
+            print(f"[DEBUG AUTH] Incoming X-Device-Api-Key header present")
+
+        raw_key = None
+
+        # Accept multiple schemes from Authorization: ApiKey <key> or Token <key>
+        if auth_header:
+            parts = auth_header.split()
+            if len(parts) == 2:
+                scheme, candidate = parts
+                if scheme in ('Bearer', 'ApiKey', 'Token'):
+                    # Note: Bearer will frequently be a JWT; this method is primarily
+                    # used by device endpoints where frontend uses Bearer for raw keys.
+                    raw_key = candidate
+                    print(f"[DEBUG AUTH] Using Authorization scheme: {scheme}")
+
+        # Fallback to explicit X-Device-Api-Key header
+        if not raw_key and xdevice:
+            raw_key = xdevice
+
+        if not raw_key:
+            print("[DEBUG AUTH] No device key found in headers.")
             return None
-            
-        token = auth_header.split(' ')[1]
-        raw_key = token
-        
+
         # Log obfuscated key for verification
         safe_key = f"{raw_key[:4]}...{raw_key[-4:]}" if len(raw_key) > 8 else "***"
         print(f"[DEBUG AUTH] Raw Key (safe): {safe_key}")

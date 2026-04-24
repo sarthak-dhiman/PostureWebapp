@@ -38,6 +38,11 @@ INSTALLED_APPS = [
     'django.contrib.sessions',
     'django.contrib.messages',
     'django.contrib.staticfiles',
+    # Third-party
+    'rest_framework',
+
+    # Local apps
+    'core_api',
 ]
 
 MIDDLEWARE = [
@@ -51,6 +56,9 @@ MIDDLEWARE = [
 ]
 
 ROOT_URLCONF = 'core_hub.urls'
+
+# Custom user model
+AUTH_USER_MODEL = 'core_api.CustomUser'
 
 TEMPLATES = [
     {

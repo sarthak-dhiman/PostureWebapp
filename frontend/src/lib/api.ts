@@ -6,6 +6,20 @@
  * if a token isn't already present in cookies.
  */
 
+// Backend API server URL (Django/DRF)
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+
+/**
+ * Constructs the full backend API URL from a relative path.
+ * Ensures frontend calls go to the backend server, not to itself.
+ */
+export function getApiUrl(path: string): string {
+    if (path.startsWith('http')) {
+        return path; // Already absolute
+    }
+    return `${API_BASE_URL}${path}`;
+}
+
 export function getCookie(name: string): string | null {
     if (typeof document === "undefined") return null; // Server-side check
     const value = `; ${document.cookie}`;
@@ -39,10 +53,10 @@ export async function apiFetch(url: string | URL | Request, options: RequestInit
         const requiresCsrf = ['POST', 'PUT', 'PATCH', 'DELETE'].includes(method);
 
         if (requiresCsrf) {
-            // Ensure we have a token before proceeding.
+            // Same-origin relative URLs are resolved against the page; use API base for backend CSRF.
             const baseUrl = typeof url === 'string' && url.startsWith('http')
                 ? new URL(url).origin
-                : process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+                : API_BASE_URL;
 
             const token = await ensureCsrfToken(baseUrl);
 
@@ -54,6 +68,12 @@ export async function apiFetch(url: string | URL | Request, options: RequestInit
             }
 
             // Ensure we send cookies along so Django can match the header to the cookie
+            options.credentials = 'include';
+        }
+        // For same-origin/API requests, include credentials by default so GET requests
+        // that rely on session cookies (authenticated endpoints) work without needing
+        // callers to explicitly set `credentials` each time.
+        if (!options.credentials) {
             options.credentials = 'include';
         }
     }

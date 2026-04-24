@@ -6,8 +6,7 @@ import { useRouter } from "next/navigation"
 import { Loader2, X, Gift } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { apiFetch } from "@/lib/api"
-import { MockPaymentModal } from "./mock-payment-modal"
+import { apiFetch, getApiUrl } from "@/lib/api"
 
 interface GiftSubscriptionModalProps {
     isOpen: boolean
@@ -24,7 +23,6 @@ export function GiftSubscriptionModal({ isOpen, onClose, planId, planName }: Gif
     const [isLoading, setIsLoading] = useState(false)
     const [error, setError] = useState<string | null>(null)
     const [razorpayScriptLoaded, setRazorpayScriptLoaded] = useState(false)
-    const [mockModal, setMockModal] = useState<{ isOpen: boolean, orderId?: string }>({ isOpen: false })
 
     // Handle Escape key
     useEffect(() => {
@@ -87,7 +85,7 @@ export function GiftSubscriptionModal({ isOpen, onClose, planId, planName }: Gif
 
         try {
             // Step 1: Tell the backend to create a Razorpay Order
-            const res = await apiFetch(`${process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"}/api/v1/billing/gift/checkout/`, {
+            const res = await apiFetch(getApiUrl('/api/v1/billing/gift/checkout/'), {
                 method: "POST",
                 headers: {
                     "Content-Type": "application/json",
@@ -109,15 +107,22 @@ export function GiftSubscriptionModal({ isOpen, onClose, planId, planName }: Gif
                 throw new Error("No active order generated.")
             }
 
-            // Bypass logic for unconfigured development environments
-            if (data.order_id.startsWith('order_test_mock')) {
-                setMockModal({ isOpen: true, orderId: data.order_id })
+            const orderId = String(data.order_id)
+            // Backend mock path returns this literal; real Razorpay order ids look like order_xxx
+            if (orderId === "order_test_mock") {
+                onClose()
+                router.push(`/pricing?gift_success=true`)
                 return
+            }
+
+            const pubKey = process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID || ""
+            if (!pubKey) {
+                throw new Error("Payment is not configured (missing NEXT_PUBLIC_RAZORPAY_KEY_ID).")
             }
 
             // Step 2: Initialize Razorpay Checkout inline modal for ONE-TIME ORDERS
             const options = {
-                key: process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID || "",
+                key: pubKey,
                 order_id: data.order_id,
                 name: "Posture OS",
                 description: `Gift: ${planName}`,
@@ -231,14 +236,6 @@ export function GiftSubscriptionModal({ isOpen, onClose, planId, planName }: Gif
                     </form>
                 </div>
             </div>
-
-            <MockPaymentModal
-                isOpen={mockModal.isOpen}
-                onClose={() => setMockModal({ isOpen: false })}
-                planName={planName}
-                orderId={mockModal.orderId}
-                token={(session?.user as any)?.accessToken || (session as any)?.accessToken}
-            />
         </div>
     )
 }

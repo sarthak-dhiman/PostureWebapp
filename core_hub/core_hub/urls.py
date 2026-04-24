@@ -21,6 +21,10 @@ urlpatterns = [
     # core_api routes
     path('api/v1/', include('core_api.urls')),
 
+    # Legacy fallbacks for /api/auth/login/ requests missing the /v1/ prefix
+    path('api/auth/login/', FlexibleTokenObtainPairView.as_view(), name='legacy_auth_login'),
+    path('api/auth/login', FlexibleTokenObtainPairView.as_view(), name='legacy_auth_login_noslash'),
+
     # Desktop app specific routes
     path('v1/', include('core_api.desktop_urls')),
 

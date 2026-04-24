@@ -7,6 +7,9 @@ def verify_turnstile_token(token: str, ip: str = None) -> bool:
     Returns True if valid, False otherwise.
     """
     if not token:
+        # Allow bypassing CAPTCHA during local development if DEBUG=True
+        if getattr(settings, 'DEBUG', False):
+            return True
         return False
         
     secret_key = getattr(settings, 'TURNSTILE_SECRET_KEY', None)

@@ -20,20 +20,29 @@ class ApiKeyAuthentication(BaseAuthentication):
     SCHEME = 'ApiKey'
 
     def authenticate(self, request):
-        auth_header = request.META.get('HTTP_AUTHORIZATION', '')
+        auth_header = request.META.get('HTTP_AUTHORIZATION', '') or ''
+        auth_header = auth_header.strip()
 
-        if not auth_header:
-            return None  # No Authorization header — let other authenticators run.
+        raw_key = None
 
-        parts = auth_header.split()
+        # Priority: explicit Authorization header with ApiKey/Token scheme
+        if auth_header:
+            parts = auth_header.split()
+            if len(parts) == 2:
+                scheme, candidate = parts
+                # Accept our ApiKey scheme and a legacy 'Token' scheme
+                if scheme == self.SCHEME or scheme == 'Token':
+                    raw_key = candidate
+                # Do not treat Bearer here; JWTAuthentication handles Bearer tokens first.
 
-        if len(parts) != 2:
-            return None  # Malformed header — not our scheme; pass.
+        # Fallback: allow an explicit X-Device-Api-Key header (common for devices)
+        if not raw_key:
+            xkey = request.META.get('HTTP_X_DEVICE_API_KEY') or request.META.get('HTTP_X_DEVICE_APIKEY')
+            if xkey:
+                raw_key = xkey.strip()
 
-        scheme, raw_key = parts
-
-        if scheme != self.SCHEME:
-            return None  # Different scheme (e.g. Bearer for JWT) — not ours; pass.
+        if not raw_key:
+            return None  # No device key found — let other authenticators run.
 
         # Hash the raw key and look it up.
         key_hash = hashlib.sha256(raw_key.encode('utf-8')).hexdigest()

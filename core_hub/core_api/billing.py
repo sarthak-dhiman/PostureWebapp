@@ -21,6 +21,12 @@ if getattr(settings, 'RAZORPAY_KEY_ID', '') and getattr(settings, 'RAZORPAY_KEY_
         auth=(settings.RAZORPAY_KEY_ID, settings.RAZORPAY_KEY_SECRET)
     )
 
+
+def _is_placeholder_plan_id(plan_id) -> bool:
+    """Frontend falls back to plan_mock_* when env plan IDs are unset; Razorpay rejects these."""
+    return isinstance(plan_id, str) and plan_id.startswith("plan_mock_")
+
+
 class CreateSubscriptionView(APIView):
     """
     POST /api/v1/billing/checkout/
@@ -55,6 +61,19 @@ class CreateSubscriptionView(APIView):
                 user.role = CustomUser.Role.ADMIN
                 user.save(update_fields=['role'])
             return Response({'subscription_id': f'sub_mock_{plan_id}'})
+
+        if _is_placeholder_plan_id(plan_id):
+            return Response(
+                {
+                    "detail": (
+                        "Billing is using placeholder plan IDs (plan_mock_*). Razorpay does not know these IDs. "
+                        "Create plans in the Razorpay Dashboard, then set NEXT_PUBLIC_RAZORPAY_PLAN_WEBCAM_MO, "
+                        "NEXT_PUBLIC_RAZORPAY_PLAN_HEALTH_MO, NEXT_PUBLIC_RAZORPAY_PLAN_COMBO_*, etc. "
+                        "to those plan IDs and rebuild the frontend container."
+                    )
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
         try:
             # Razorpay requires total_count (number of billing cycles). We'll set it high for "ongoing"
@@ -125,6 +144,17 @@ class GiftCheckoutSessionView(APIView):
                 plan_id=plan_id,
             )
             return Response({'order_id': f"order_test_mock"})
+
+        if _is_placeholder_plan_id(plan_id):
+            return Response(
+                {
+                    "detail": (
+                        "Gift checkout needs real Razorpay plan IDs, not plan_mock_* placeholders. "
+                        "Set NEXT_PUBLIC_RAZORPAY_PLAN_* env vars and rebuild the frontend."
+                    )
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
         try:
             # 1. Fetch Plan to get the amount
@@ -389,8 +419,8 @@ class RazorpayWebhookView(APIView):
             return Response(status=status.HTTP_400_BAD_REQUEST)
 
         try:
-            # Verify signature
-            razorpay_client.utility.verify_webhook_signature(payload, signature, secret)
+            # Webhook HMAC does not use API key/secret; Utility works without a Client.
+            razorpay.Utility().verify_webhook_signature(payload, signature, secret)
         except razorpay.errors.SignatureVerificationError as e:
             send_system_alert(
                 "Webhook Signature Verification Failed",
@@ -408,7 +438,6 @@ class RazorpayWebhookView(APIView):
 
         import json
         event = json.loads(payload)
-        event_id = event.get('account_id') # Razorpay actually sends event_id as 'account_id' sometimes, but the standard is 'id'
         event_id = event.get('id')
         
         if not event_id:
@@ -525,39 +554,41 @@ class RazorpayWebhookView(APIView):
             subscription_id = sub.get('id')
             try:
                 org = Organization.objects.get(razorpay_subscription_id=subscription_id)
-                
-                # Check for seat changes in notes/metadata if we pass them
-                # Razorpay subscriptions can have notes
                 notes = sub.get('notes', {})
-                new_seats = notes.get('total_seats') or notes.get('max_seats')
-                
-                if new_seats:
+
+                quantity = sub.get('quantity')
+                if quantity is not None:
                     try:
-                        org.max_seats = int(new_seats)
+                        org.max_seats = int(quantity)
                     except (ValueError, TypeError):
                         pass
+                else:
+                    new_seats = notes.get('total_seats') or notes.get('max_seats')
+                    if new_seats is not None:
+                        try:
+                            org.max_seats = int(new_seats)
+                        except (ValueError, TypeError):
+                            pass
 
-                # Sync status
                 status_val = sub.get('status')
-                if status_val == 'active':
-                    org.is_active = True
-                
-                # Sync billing period
-                current_end = sub.get('current_end')
-                if current_end:
-                    org.current_period_end = timezone.datetime.fromtimestamp(current_end, tz=timezone.utc)
-                
+                org.is_active = status_val in ['active', 'authenticated']
+
+                new_end_ts = sub.get('current_end')
+                if new_end_ts:
+                    new_end = timezone.datetime.fromtimestamp(new_end_ts, tz=timezone.utc)
+                    if org.current_period_end and (new_end - org.current_period_end).days > 1:
+                        reset_organization_usage(org)
+                    org.current_period_end = new_end
+
                 org.save(update_fields=['is_active', 'max_seats', 'current_period_end'])
-                
-                # Log Transaction
+
                 BillingTransaction.objects.create(
                     organization=org,
                     transaction_id=subscription_id,
                     event_type=event_type,
                     payload=event
                 )
-                
-                # Send Email
+
                 admin_user = org.users.filter(role=CustomUser.Role.ADMIN).first() or org.users.first()
                 if admin_user:
                     send_billing_email(admin_user, 'plan_updated', {
@@ -565,7 +596,7 @@ class RazorpayWebhookView(APIView):
                         'plan_details': sub.get('plan_id', 'Updated Plan'),
                         'max_seats': org.max_seats
                     })
-                
+
                 print(f"[BILLING] Subscription {subscription_id} updated. Org {org.id} synced.")
             except Organization.DoesNotExist:
                 pass
@@ -608,38 +639,6 @@ class RazorpayWebhookView(APIView):
             except Organization.DoesNotExist:
                 pass
 
-        elif event_type == 'subscription.updated':
-            sub = event['payload']['subscription']['entity']
-            subscription_id = sub.get('id')
-            try:
-                org = Organization.objects.get(razorpay_subscription_id=subscription_id)
-                # Sync quantity 
-                quantity = sub.get('quantity')
-                if quantity is not None and quantity != org.max_seats:
-                    org.max_seats = quantity
-                    org.save(update_fields=['max_seats'])
-                
-                # Check status
-                status_val = sub.get('status')
-                is_active = status_val in ['active', 'authenticated']
-                
-                # Check for cycle reset (current_end changed)
-                new_end_ts = sub.get('current_end')
-                if new_end_ts:
-                    new_end = timezone.datetime.fromtimestamp(new_end_ts, tz=timezone.utc)
-                    # If the end date has moved forward by more than 1 day, it's likely a renewal
-                    if org.current_period_end and (new_end - org.current_period_end).days > 1:
-                        reset_organization_usage(org)
-                    org.current_period_end = new_end
-
-                if org.is_active != is_active:
-                    org.is_active = is_active
-                    org.save(update_fields=['is_active', 'max_seats', 'current_period_end'])
-                else:
-                    org.save(update_fields=['max_seats', 'current_period_end'])
-            except Organization.DoesNotExist:
-                pass
-                
         elif event_type == 'order.paid':
             order = event['payload']['order']['entity']
             notes = order.get('notes', {})
@@ -690,27 +689,6 @@ class RazorpayWebhookView(APIView):
                 payload=event
             )
             # In a real app, we would send an email to the user here.
-
-        elif event_type == 'invoice.paid':
-            invoice = event['payload']['invoice']['entity']
-            subscription_id = invoice.get('subscription_id')
-            if subscription_id:
-                try:
-                    org = Organization.objects.get(razorpay_subscription_id=subscription_id)
-                    org.is_active = True
-                    org.save(update_fields=['is_active'])
-                    
-                    # Log Transaction
-                    BillingTransaction.objects.create(
-                        organization=org,
-                        transaction_id=subscription_id,
-                        event_type=event_type,
-                        payload=event
-                    )
-                    
-                    print(f"[BILLING] Invoice paid for subscription {subscription_id}. Org {org.id} is active.")
-                except Organization.DoesNotExist:
-                    pass
 
         elif event_type == 'refund.processed':
             refund_entity = event['payload']['refund']['entity']
@@ -765,16 +743,14 @@ class RazorpayWebhookView(APIView):
                 pass
 
         elif event_type in ['invoice.paid', 'invoice.issued', 'invoice.failed']:
-            # Handle Razorpay Invoice events
             invoice_data = event['payload']['invoice']['entity']
             invoice_id = invoice_data.get('id')
             subscription_id = invoice_data.get('subscription_id')
-            
+
             try:
                 if subscription_id:
                     org = Organization.objects.get(razorpay_subscription_id=subscription_id)
                 else:
-                    # Try notes or associated order
                     notes = invoice_data.get('notes', {})
                     org_id = notes.get('organization_id')
                     if org_id:
@@ -782,9 +758,26 @@ class RazorpayWebhookView(APIView):
                     else:
                         raise Organization.DoesNotExist()
 
-                invoice_status = 'paid' if event_type == 'invoice.paid' else 'issued' if event_type == 'invoice.issued' else 'failed'
-                
-                invoice, created = Invoice.objects.update_or_create(
+                if event_type == 'invoice.paid':
+                    org.is_active = True
+                    org.save(update_fields=['is_active'])
+                    BillingTransaction.objects.create(
+                        organization=org,
+                        transaction_id=subscription_id or invoice_id,
+                        event_type=event_type,
+                        payload=event
+                    )
+                    print(
+                        f"[BILLING] Invoice paid (invoice {invoice_id}). "
+                        f"Subscription {subscription_id or 'N/A'}. Org {org.id} active."
+                    )
+
+                invoice_status = (
+                    'paid' if event_type == 'invoice.paid' else
+                    'issued' if event_type == 'invoice.issued' else 'failed'
+                )
+
+                Invoice.objects.update_or_create(
                     razorpay_invoice_id=invoice_id,
                     defaults={
                         'organization': org,
@@ -793,11 +786,13 @@ class RazorpayWebhookView(APIView):
                         'currency': invoice_data.get('currency', 'INR'),
                         'status': invoice_status,
                         'invoice_pdf_url': invoice_data.get('short_url'),
-                        'issued_at': timezone.datetime.fromtimestamp(invoice_data.get('issued_at'), tz=timezone.utc) if invoice_data.get('issued_at') else timezone.now(),
+                        'issued_at': timezone.datetime.fromtimestamp(
+                            invoice_data.get('issued_at'), tz=timezone.utc
+                        ) if invoice_data.get('issued_at') else timezone.now(),
                         'paid_at': timezone.now() if event_type == 'invoice.paid' else None
                     }
                 )
-                print(f"[BILLING] Invoice {invoice_id} synced for Org {org.id}. Status: {invoice.status}")
+                print(f"[BILLING] Invoice {invoice_id} synced for Org {org.id}. Status: {invoice_status}")
             except Organization.DoesNotExist:
                 print(f"[BILLING WARNING] Received invoice {invoice_id} for unknown organization.")
                 pass
