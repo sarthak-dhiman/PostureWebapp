@@ -2,7 +2,6 @@ FROM python:3.12-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    NODE_ENV=production \
     DJANGO_SETTINGS_MODULE=core_hub.settings \
     API_URL=http://127.0.0.1:8000 \
     INTERNAL_API_URL=http://127.0.0.1:8000
@@ -36,6 +35,8 @@ COPY . /app
 RUN cd /app/frontend && npm run build
 
 RUN chmod +x /app/render-start.sh
+
+ENV NODE_ENV=production
 
 EXPOSE 3000
 CMD ["/app/render-start.sh"]
