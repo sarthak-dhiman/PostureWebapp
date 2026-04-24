@@ -23,5 +23,17 @@ shutdown() {
 
 trap shutdown INT TERM
 
-# Exit when either process exits; Render will restart the service.
-wait -n "$DJANGO_PID" "$NEXT_PID"
+# POSIX-safe replacement for `wait -n` (not available in Debian dash /bin/sh).
+while true; do
+  if ! kill -0 "$DJANGO_PID" 2>/dev/null; then
+    wait "$DJANGO_PID" || true
+    shutdown
+    exit 1
+  fi
+  if ! kill -0 "$NEXT_PID" 2>/dev/null; then
+    wait "$NEXT_PID" || true
+    shutdown
+    exit 1
+  fi
+  sleep 1
+done
