@@ -1,5 +1,5 @@
 from rest_framework import status
-from rest_framework.permissions import IsAuthenticated
+from rest_framework.permissions import IsAuthenticated, AllowAny
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
@@ -41,7 +41,7 @@ class CaptchaView(APIView):
     GET /api/v1/auth/captcha/
     Generates a new math captcha and returns its ID and SVG image.
     """
-    permission_classes = []
+    permission_classes = [AllowAny]
 
     def get(self, request):
         captcha_id, image_uri = generate_math_captcha()
