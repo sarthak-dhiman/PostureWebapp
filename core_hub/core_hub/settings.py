@@ -150,10 +150,15 @@ STATIC_ROOT = env('STATIC_ROOT', default=os.path.join(BASE_DIR, 'staticfiles'))
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
 # ─── CORS ─────────────────────────────────────────────────────────────────────
+_production_origin = env('NEXTAUTH_URL', default=None)  # e.g. https://postureos.onrender.com
+
 CORS_ALLOWED_ORIGINS = [
     "http://localhost:3000",
     "http://127.0.0.1:3000",
 ]
+if _production_origin:
+    CORS_ALLOWED_ORIGINS.append(_production_origin)
+
 CORS_ALLOW_CREDENTIALS = True
 
 # ─── CSRF Protection for SPA ──────────────────────────────────────────────────
@@ -161,6 +166,9 @@ CSRF_TRUSTED_ORIGINS = [
     "http://localhost:3000",
     "http://127.0.0.1:3000",
 ]
+if _production_origin:
+    CSRF_TRUSTED_ORIGINS.append(_production_origin)
+
 CSRF_COOKIE_SAMESITE = 'Lax'
 CSRF_COOKIE_HTTPONLY = False  # Allows the React frontend to read it
 CSRF_USE_SESSIONS = False
