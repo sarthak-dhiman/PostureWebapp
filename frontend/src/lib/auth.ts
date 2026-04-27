@@ -32,9 +32,7 @@ const providers: AuthOptions["providers"] = [
     name: "Credentials",
     credentials: {
       username: { label: "Username", type: "text" },
-      password: { label: "Password", type: "password" },
-      captcha_id: { label: "Captcha ID", type: "text" },
-      captcha_solution: { label: "Captcha Solution", type: "text" }
+      password: { label: "Password", type: "password" }
     },
     async authorize(credentials) {
       console.log("AUTHORIZE START for", credentials?.username);
@@ -50,10 +48,6 @@ const providers: AuthOptions["providers"] = [
         const payload: any = {
           username: credentials?.username,
           password: credentials?.password,
-        }
-        if (credentials?.captcha_id && credentials?.captcha_solution) {
-          payload.captcha_id = credentials.captcha_id;
-          payload.captcha_solution = credentials.captcha_solution;
         }
 
         const tokenRes = await apiFetch(`${backendBaseUrl}/api/v1/auth/token/`, {

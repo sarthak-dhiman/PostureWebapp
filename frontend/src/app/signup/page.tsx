@@ -12,7 +12,6 @@ import {
   Briefcase,
   UserPlus,
 } from "lucide-react";
-import { CaptchaWidget } from "@/components/ui/captcha-widget";
 import { apiFetch } from "@/lib/api";
 
 export default function SignupPage() {
@@ -31,7 +30,6 @@ export default function SignupPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [successMessage, setSuccessMessage] = useState("");
-  const [captchaData, setCaptchaData] = useState<{ captcha_id: string; captcha_solution: string } | null>(null);
 
   const handleSignup = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -53,8 +51,6 @@ export default function SignupPage() {
           account_type: accountType,
           org_name: accountType === "org" ? orgName : undefined,
           invite_code: accountType === "join" ? inviteCode : undefined,
-          captcha_id: captchaData?.captcha_id,
-          captcha_solution: captchaData?.captcha_solution,
         }),
       });
 
@@ -302,10 +298,8 @@ export default function SignupPage() {
                   </p>
                 )}
 
-                <CaptchaWidget onVerify={setCaptchaData} />
-
                 <button
-                  disabled={loading || !captchaData}
+                  disabled={loading}
                   type="submit"
                   className="w-full flex items-center justify-center gap-2 bg-slate-900 text-white hover:bg-slate-800 transition-colors h-9 px-4 py-2 rounded-md font-medium text-sm disabled:opacity-50"
                 >
@@ -363,10 +357,8 @@ export default function SignupPage() {
                   </p>
                 )}
 
-                <CaptchaWidget onVerify={setCaptchaData} />
-
                 <button
-                  disabled={loading || !captchaData}
+                  disabled={loading}
                   type="submit"
                   className="w-full flex items-center justify-center gap-2 bg-slate-900 text-white hover:bg-slate-800 transition-colors h-9 px-4 py-2 rounded-md font-medium text-sm disabled:opacity-50"
                 >
@@ -467,10 +459,8 @@ export default function SignupPage() {
                   </p>
                 )}
 
-                <CaptchaWidget onVerify={setCaptchaData} />
-
                 <button
-                  disabled={loading || !captchaData}
+                  disabled={loading}
                   type="submit"
                   className="w-full flex items-center justify-center gap-2 bg-slate-900 text-white hover:bg-slate-800 transition-colors h-9 px-4 py-2 rounded-md font-medium text-sm disabled:opacity-50"
                 >

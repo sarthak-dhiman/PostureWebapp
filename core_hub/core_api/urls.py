@@ -1,5 +1,5 @@
 from django.urls import path
-from .views import LogIngestView, UserProfileView, GoogleOAuthBeginView, GoogleOAuthCallbackView, GoogleOAuthPollView, UserRegistrationView, GoogleOAuthWebVerifyView, JoinOrganizationView, OrganizationDetailView, UpgradeToOrganizationView, QuotaStatusView, QuotaLogView, OrganizationMemberManagementView, OrganizationAddMemberView, VerifyEmailView, CSRFTokenView, CaptchaView
+from .views import LogIngestView, UserProfileView, GoogleOAuthBeginView, GoogleOAuthCallbackView, GoogleOAuthPollView, UserRegistrationView, GoogleOAuthWebVerifyView, JoinOrganizationView, OrganizationDetailView, UpgradeToOrganizationView, QuotaStatusView, QuotaLogView, OrganizationMemberManagementView, OrganizationAddMemberView, VerifyEmailView, CSRFTokenView
 from . import billing
 from . import views
 from . import cctv_views
@@ -31,7 +31,6 @@ urlpatterns = [
     path('auth/resend-verification/', views.ResendVerificationView.as_view(), name='auth-resend-verification'),
     path('auth/phone/request/', views.PhoneRequestView.as_view(), name='auth-phone-request'),
     path('auth/phone/verify/', views.PhoneVerifyView.as_view(), name='auth-phone-verify'),
-    path('auth/captcha/', CaptchaView.as_view(), name='auth-captcha'),
     path('ads/watch/', views.AdWatchView.as_view(), name='ads-watch'),
     path('ads/status/', views.AdStatusView.as_view(), name='ads-status'),
     
