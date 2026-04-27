@@ -24,15 +24,19 @@ export default function RootLayout({
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  // Bypass Next.js static build-time replacement (DefinePlugin)
+  // so that variables are truly read dynamically at runtime on the server.
+  const getEnv = (name: string) => process.env[name];
+
   return (
     <html lang="en" suppressHydrationWarning>
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased min-h-screen bg-slate-50 flex flex-col select-none`}
       >
         <Providers config={{
-          turnstileSiteKey: process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY || "",
-          razorpayKeyId: process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID || "",
-          razorpayBusinessPlanId: process.env.NEXT_PUBLIC_RAZORPAY_PLAN_BUSINESS || "",
+          turnstileSiteKey: getEnv("NEXT_PUBLIC_TURNSTILE_SITE_KEY") || "",
+          razorpayKeyId: getEnv("NEXT_PUBLIC_RAZORPAY_KEY_ID") || "",
+          razorpayBusinessPlanId: getEnv("NEXT_PUBLIC_RAZORPAY_PLAN_BUSINESS") || "",
         }}>
           <Navbar />
           <main className="flex-1 flex flex-col">
