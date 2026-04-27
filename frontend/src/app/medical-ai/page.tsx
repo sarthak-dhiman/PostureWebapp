@@ -34,7 +34,8 @@ export default function MedicalAIPage() {
         // If we reach here, it means the user is authenticated and has a subscription.
 
         // Redirect to the external Medical AI app
-        window.location.href = "http://localhost:5173"
+        const medicalAiUrl = process.env.NEXT_PUBLIC_MEDICAL_AI_URL || "https://medical-ai-posture.onrender.com"
+        window.location.href = medicalAiUrl
     }
 
     return (

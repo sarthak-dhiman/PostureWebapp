@@ -6,7 +6,7 @@ import { useRouter } from "next/navigation"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { ShieldCheck, Loader2, Activity, Users, Zap, CheckCircle2 } from "lucide-react"
+import { ShieldCheck, Loader2, Activity, Users, Zap, CheckCircle2, ArrowLeft } from "lucide-react"
 
 export default function LoginPage() {
     const router = useRouter()
@@ -76,6 +76,17 @@ export default function LoginPage() {
 
             {/* Right Side - Login Form */}
             <div className="flex flex-col justify-center items-center p-6 sm:p-12 relative">
+                {/* Back Button */}
+                <button 
+                    onClick={() => router.push("/")}
+                    className="absolute top-8 left-8 flex items-center gap-2 text-sm font-bold text-slate-400 hover:text-slate-900 transition-colors group"
+                >
+                    <div className="w-8 h-8 rounded-full border border-slate-200 flex items-center justify-center group-hover:border-slate-900 transition-colors">
+                        <ArrowLeft className="w-4 h-4" />
+                    </div>
+                    Back
+                </button>
+
                 {/* Mobile Header (Only visible on small screens) */}
                 <div className="lg:hidden w-full max-w-sm mb-10 text-center">
                     <div className="mx-auto bg-violet-100 w-16 h-16 rounded-full flex items-center justify-center mb-4">

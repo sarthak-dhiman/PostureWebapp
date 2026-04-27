@@ -7,6 +7,7 @@ import { Loader2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { apiFetch, getApiUrl } from "@/lib/api"
 import { useConfig } from "@/context/config-context"
+import { MockPaymentModal } from "./mock-payment-modal"
 
 interface SubscribeButtonProps {
     planId: string
@@ -24,6 +25,8 @@ export function SubscribeButton({ planId, planName, className = "", buttonText =
     const [isLoading, setIsLoading] = useState(false)
     const [error, setError] = useState<string | null>(null)
     const [razorpayScriptLoaded, setRazorpayScriptLoaded] = useState(false)
+    const [showMockModal, setShowMockModal] = useState(false)
+    const [lastSubscriptionId, setLastSubscriptionId] = useState<string>("")
 
     // Dynamically inject the Razorpay checkout script
     useEffect(() => {
@@ -87,7 +90,9 @@ export function SubscribeButton({ planId, planName, className = "", buttonText =
             // Dev/mock: backend returns sub_mock_* when keys are missing or placeholder.
             // Opening Razorpay with a fake subscription_id always fails.
             if (String(data.subscription_id).startsWith("sub_mock_")) {
-                router.push(`/dashboard?subscription_id=${encodeURIComponent(data.subscription_id)}&status=success`)
+                setLastSubscriptionId(data.subscription_id)
+                setShowMockModal(true)
+                setIsLoading(false)
                 return
             }
 

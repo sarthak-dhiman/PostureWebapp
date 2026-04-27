@@ -12,7 +12,7 @@ import {
   Briefcase,
   UserPlus,
 } from "lucide-react";
-import { apiFetch } from "@/lib/api";
+import { apiFetch, API_BASE_URL } from "@/lib/api";
 
 export default function SignupPage() {
   const [step, setStep] = useState(1);
@@ -37,8 +37,7 @@ export default function SignupPage() {
     setError("");
 
     try {
-      const apiBase =
-        process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+      const apiBase = API_BASE_URL;
 
       // 1. Register the user
       const regRes = await apiFetch(`${apiBase}/api/v1/auth/register/`, {

@@ -82,7 +82,7 @@ export default function ProductsPage() {
                                 <ShieldCheck className="w-4 h-4 text-emerald-500" /> Web & API Access
                             </div>
                         </div>
-                        <Link href="http://localhost:5173/" target="_blank" className="mt-auto flex items-center justify-between w-full bg-slate-50 hover:bg-rose-50 text-slate-900 hover:text-rose-700 px-4 py-3 rounded-xl font-semibold transition-colors border border-slate-200 hover:border-rose-200">
+                        <Link href="https://medical-ai-posture.onrender.com/" target="_blank" className="mt-auto flex items-center justify-between w-full bg-slate-50 hover:bg-rose-50 text-slate-900 hover:text-rose-700 px-4 py-3 rounded-xl font-semibold transition-colors border border-slate-200 hover:border-rose-200">
                             Launch App <ArrowRight className="w-4 h-4" />
                         </Link>
                     </div>

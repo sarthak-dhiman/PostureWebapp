@@ -15,7 +15,7 @@ import {
     ChevronLeft, AlertTriangle, Users, Play, Clock, MapPin, AlertCircle
 } from "lucide-react"
 import { CCTVStreamModal } from "@/components/ui/cctv-stream-modal"
-import { apiFetch, getApiUrl } from "@/lib/api"
+import { apiFetch, getApiUrl, API_BASE_URL } from "@/lib/api"
 
 export default function NodeDetailPage() {
     const { id } = useParams()
@@ -44,7 +44,7 @@ export default function NodeDetailPage() {
     useEffect(() => {
         if (!id || !token) return
 
-        const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
+        const apiUrl = API_BASE_URL
         const wsUrl = `${apiUrl.replace('http', 'ws')}/ws/api/v1/cctv/stream/${id}/`
 
         const ws = new WebSocket(wsUrl)

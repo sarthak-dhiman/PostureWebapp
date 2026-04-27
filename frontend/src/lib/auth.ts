@@ -20,7 +20,7 @@ const backendBaseUrl =
   process.env.INTERNAL_API_URL ||
   process.env.API_URL ||
   process.env.NEXT_PUBLIC_API_URL ||
-  "http://127.0.0.1:8000";
+  "https://postureos.onrender.com";
 
 const googleClientId =
   process.env.GOOGLE_OAUTH_CLIENT_ID || process.env.GOOGLE_CLIENT_ID || "";

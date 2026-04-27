@@ -7,6 +7,7 @@ import { Loader2, X, Gift } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { apiFetch, getApiUrl } from "@/lib/api"
+import { MockPaymentModal } from "./mock-payment-modal"
 
 interface GiftSubscriptionModalProps {
     isOpen: boolean
@@ -23,6 +24,8 @@ export function GiftSubscriptionModal({ isOpen, onClose, planId, planName }: Gif
     const [isLoading, setIsLoading] = useState(false)
     const [error, setError] = useState<string | null>(null)
     const [razorpayScriptLoaded, setRazorpayScriptLoaded] = useState(false)
+    const [showMockModal, setShowMockModal] = useState(false)
+    const [lastOrderId, setLastOrderId] = useState<string>("")
 
     // Handle Escape key
     useEffect(() => {
@@ -108,10 +111,11 @@ export function GiftSubscriptionModal({ isOpen, onClose, planId, planName }: Gif
             }
 
             const orderId = String(data.order_id)
-            // Backend mock path returns this literal; real Razorpay order ids look like order_xxx
-            if (orderId === "order_test_mock") {
-                onClose()
-                router.push(`/pricing?gift_success=true`)
+            // Backend mock path returns this; real Razorpay order ids look like order_xxx
+            if (orderId === "order_test_mock" || orderId.startsWith("order_test_")) {
+                setLastOrderId(orderId)
+                setShowMockModal(true)
+                setIsLoading(false)
                 return
             }
 
@@ -236,6 +240,14 @@ export function GiftSubscriptionModal({ isOpen, onClose, planId, planName }: Gif
                     </form>
                 </div>
             </div>
+
+            <MockPaymentModal
+                isOpen={showMockModal}
+                onClose={() => setShowMockModal(false)}
+                planName={`Gift: ${planName}`}
+                orderId={lastOrderId}
+                token={(session?.user as any)?.accessToken || (session as any)?.accessToken}
+            />
         </div>
     )
 }
