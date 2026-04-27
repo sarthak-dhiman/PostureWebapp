@@ -12,6 +12,7 @@ import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle }
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { apiFetch, getApiUrl } from "@/lib/api"
+import { useConfig } from "@/context/config-context"
 
 const ROLE_LABELS: Record<string, { label: string; color: string }> = {
     SOLO: { label: "Solo User", color: "bg-blue-100 text-blue-700 border-blue-200" },
@@ -23,6 +24,7 @@ const ROLE_LABELS: Record<string, { label: string; color: string }> = {
 export default function SettingsPage() {
     const { sessionStatus, isLoading, hasSubscription, org, isAdmin, isSolo, user, role, token } = useSubscription()
     const router = useRouter()
+    const config = useConfig()
     const [loadingCheckout, setLoadingCheckout] = useState(false)
     const [loadingPortal, setLoadingPortal] = useState(false)
     const [portalError, setPortalError] = useState("")
@@ -44,7 +46,7 @@ export default function SettingsPage() {
                     window.location.reload()
                     return
                 }
-                const pubKey = process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID || ""
+                const pubKey = config?.razorpayKeyId || process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID || ""
                 if (!pubKey) {
                     throw new Error("Payment is not configured (missing NEXT_PUBLIC_RAZORPAY_KEY_ID).")
                 }
@@ -193,7 +195,7 @@ export default function SettingsPage() {
                                 </div>
                                 {checkoutError && <p className="text-sm text-red-600 font-medium">{checkoutError}</p>}
                                 <Button
-                                    onClick={() => handleSubscribe(process.env.NEXT_PUBLIC_RAZORPAY_PLAN_BUSINESS || "plan_mock_business_mo")}
+                                    onClick={() => handleSubscribe(config?.razorpayBusinessPlanId || process.env.NEXT_PUBLIC_RAZORPAY_PLAN_BUSINESS || "plan_mock_business_mo")}
                                     disabled={loadingCheckout}
                                     className="w-full bg-gradient-to-r from-violet-600 to-indigo-600 text-white font-bold h-11 rounded-xl hover:opacity-90 shadow-lg shadow-violet-500/20"
                                 >

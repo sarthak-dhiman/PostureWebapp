@@ -5,6 +5,7 @@ import React, { createContext, useContext, ReactNode } from "react"
 interface Config {
     turnstileSiteKey: string
     razorpayKeyId: string
+    razorpayBusinessPlanId: string
     // Add other public variables here if needed
 }
 

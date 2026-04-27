@@ -32,6 +32,7 @@ export default function RootLayout({
         <Providers config={{
           turnstileSiteKey: process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY || "",
           razorpayKeyId: process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID || "",
+          razorpayBusinessPlanId: process.env.NEXT_PUBLIC_RAZORPAY_PLAN_BUSINESS || "",
         }}>
           <Navbar />
           <main className="flex-1 flex flex-col">
