@@ -1,5 +1,6 @@
 "use client"
 
+import { useConfig } from "@/context/config-context"
 import Turnstile from "react-turnstile"
 
 interface TurnstileWidgetProps {
@@ -8,7 +9,8 @@ interface TurnstileWidgetProps {
 }
 
 export function TurnstileWidget({ onVerify, onError }: TurnstileWidgetProps) {
-    const siteKey = process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY || ""
+    const config = useConfig()
+    const siteKey = config?.turnstileSiteKey || process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY || ""
 
     if (!siteKey) {
         return (

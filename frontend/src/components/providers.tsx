@@ -3,7 +3,9 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { SessionProvider } from "next-auth/react"
 import { useState } from "react"
 
-export function Providers({ children }: { children: React.ReactNode }) {
+import { ConfigProvider } from "@/context/config-context"
+
+export function Providers({ children, config }: { children: React.ReactNode, config: any }) {
     const [queryClient] = useState(() => new QueryClient({
         defaultOptions: {
             queries: {
@@ -13,10 +15,12 @@ export function Providers({ children }: { children: React.ReactNode }) {
     }))
 
     return (
-        <SessionProvider>
-            <QueryClientProvider client={queryClient}>
-                {children}
-            </QueryClientProvider>
-        </SessionProvider>
+        <ConfigProvider config={config}>
+            <SessionProvider>
+                <QueryClientProvider client={queryClient}>
+                    {children}
+                </QueryClientProvider>
+            </SessionProvider>
+        </ConfigProvider>
     )
 }

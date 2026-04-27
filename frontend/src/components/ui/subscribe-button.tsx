@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation"
 import { Loader2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { apiFetch, getApiUrl } from "@/lib/api"
+import { useConfig } from "@/context/config-context"
 
 interface SubscribeButtonProps {
     planId: string
@@ -19,6 +20,7 @@ interface SubscribeButtonProps {
 export function SubscribeButton({ planId, planName, className = "", buttonText = "Subscribe", fallbackUrl }: SubscribeButtonProps) {
     const { data: session, status } = useSession()
     const router = useRouter()
+    const config = useConfig()
     const [isLoading, setIsLoading] = useState(false)
     const [error, setError] = useState<string | null>(null)
     const [razorpayScriptLoaded, setRazorpayScriptLoaded] = useState(false)
@@ -89,7 +91,7 @@ export function SubscribeButton({ planId, planName, className = "", buttonText =
                 return
             }
 
-            const pubKey = process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID || ""
+            const pubKey = config?.razorpayKeyId || process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID || ""
             if (!pubKey) {
                 throw new Error("Payment is not configured (missing NEXT_PUBLIC_RAZORPAY_KEY_ID).")
             }

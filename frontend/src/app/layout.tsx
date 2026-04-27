@@ -29,7 +29,10 @@ export default function RootLayout({
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased min-h-screen bg-slate-50 flex flex-col select-none`}
       >
-        <Providers>
+        <Providers config={{
+          turnstileSiteKey: process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY || "",
+          razorpayKeyId: process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID || "",
+        }}>
           <Navbar />
           <main className="flex-1 flex flex-col">
             {children}

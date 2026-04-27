@@ -1,6 +1,15 @@
 #!/bin/sh
 set -eu
 
+# Load production environment variables if present
+if [ -f .env.production ]; then
+  echo "Loading environment from .env.production"
+  set -a
+  . ./.env.production
+  set +a
+fi
+
+
 # Render assigns PORT dynamically; Next.js must listen on it.
 export PORT="${PORT:-3000}"
 export HOSTNAME="0.0.0.0"
