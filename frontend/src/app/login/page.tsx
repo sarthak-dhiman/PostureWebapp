@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { ShieldCheck, Loader2, Activity, Users, Zap, CheckCircle2 } from "lucide-react"
-import { TurnstileWidget } from "@/components/ui/turnstile-widget"
+import { CaptchaWidget } from "@/components/ui/captcha-widget"
 
 export default function LoginPage() {
     const router = useRouter()
@@ -16,7 +16,7 @@ export default function LoginPage() {
     const [password, setPassword] = useState("")
     const [error, setError] = useState("")
     const [loading, setLoading] = useState(false)
-    const [turnstileToken, setTurnstileToken] = useState("")
+    const [captchaData, setCaptchaData] = useState<{ captcha_id: string; captcha_solution: string } | null>(null)
 
     useEffect(() => {
         if (status === "authenticated") {
@@ -32,7 +32,8 @@ export default function LoginPage() {
         const res = await signIn("credentials", {
             username,
             password,
-            "cf-turnstile-response": turnstileToken,
+            captcha_id: captchaData?.captcha_id,
+            captcha_solution: captchaData?.captcha_solution,
             redirect: false,
         })
 
@@ -127,12 +128,9 @@ export default function LoginPage() {
                         </div>
                         {error && <p className="text-sm text-destructive font-bold">{error}</p>}
 
-                        <TurnstileWidget
-                            onVerify={(token) => setTurnstileToken(token)}
-                            onError={() => setTurnstileToken("")}
-                        />
+                        <CaptchaWidget onVerify={setCaptchaData} />
 
-                        <Button type="submit" className="w-full h-12 bg-slate-900 hover:bg-slate-800 text-white font-bold rounded-xl shadow-lg shadow-slate-900/20 transition-all hover:scale-[1.02] active:scale-[0.98]" disabled={loading || !turnstileToken}>
+                        <Button type="submit" className="w-full h-12 bg-slate-900 hover:bg-slate-800 text-white font-bold rounded-xl shadow-lg shadow-slate-900/20 transition-all hover:scale-[1.02] active:scale-[0.98]" disabled={loading || !captchaData}>
                             {loading ? (
                                 <>
                                     <Loader2 className="mr-2 h-5 w-5 animate-spin" />

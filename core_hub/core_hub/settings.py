@@ -31,10 +31,7 @@ RAZORPAY_KEY_ID = env('RAZORPAY_KEY_ID', default='')
 RAZORPAY_KEY_SECRET = env('RAZORPAY_KEY_SECRET', default='')
 RAZORPAY_WEBHOOK_SECRET = env('RAZORPAY_WEBHOOK_SECRET', default='')
 
-# Cloudflare Turnstile secret (server-side). Keep empty in production only if
-# you intend to use a different CAPTCHA provider. For local development set
-# this in your .env or rely on DEBUG-mode bypass in the verifier.
-TURNSTILE_SECRET_KEY = env('TURNSTILE_SECRET_KEY', default=None)
+
 
 
 # ─── Google OAuth ─────────────────────────────────────────────────────────────

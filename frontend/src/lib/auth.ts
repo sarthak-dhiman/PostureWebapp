@@ -33,7 +33,8 @@ const providers: AuthOptions["providers"] = [
     credentials: {
       username: { label: "Username", type: "text" },
       password: { label: "Password", type: "password" },
-      "cf-turnstile-response": { label: "Captcha", type: "text" }
+      captcha_id: { label: "Captcha ID", type: "text" },
+      captcha_solution: { label: "Captcha Solution", type: "text" }
     },
     async authorize(credentials) {
       console.log("AUTHORIZE START for", credentials?.username);
@@ -50,8 +51,9 @@ const providers: AuthOptions["providers"] = [
           username: credentials?.username,
           password: credentials?.password,
         }
-        if (credentials?.["cf-turnstile-response"]) {
-          payload["cf-turnstile-response"] = credentials["cf-turnstile-response"]
+        if (credentials?.captcha_id && credentials?.captcha_solution) {
+          payload.captcha_id = credentials.captcha_id;
+          payload.captcha_solution = credentials.captcha_solution;
         }
 
         const tokenRes = await apiFetch(`${backendBaseUrl}/api/v1/auth/token/`, {

@@ -5,7 +5,7 @@ from rest_framework.views import APIView
 
 from .models import CustomUser, PlatformLog, ServiceAccount, Organization
 from rest_framework.throttling import ScopedRateThrottle
-from .utils.turnstile import verify_turnstile_token
+from .utils.captcha import verify_math_captcha, generate_math_captcha
 from .utils.email import send_verification_email, send_billing_email
 from django.utils.http import urlsafe_base64_decode
 from django.utils.encoding import force_str
@@ -34,6 +34,21 @@ class CSRFTokenView(APIView):
 
     def get(self, request):
         return Response({'message': 'CSRF cookie set'})
+
+
+class CaptchaView(APIView):
+    """
+    GET /api/v1/auth/captcha/
+    Generates a new math captcha and returns its ID and SVG image.
+    """
+    permission_classes = []
+
+    def get(self, request):
+        captcha_id, image_uri = generate_math_captcha()
+        return Response({
+            "captcha_id": captcha_id,
+            "captcha_image": image_uri
+        })
 
 
 # Mapping from ServiceAccount.source_type → permitted app_source values.
@@ -592,10 +607,11 @@ class FlexibleTokenObtainPairView(APIView):
         if not identifier or not password:
             return Response({'detail': 'Must include email/username and password.'}, status=status.HTTP_400_BAD_REQUEST)
 
-        # Verify Turnstile
-        turnstile_token = request.data.get('cf-turnstile-response')
-        if not verify_turnstile_token(turnstile_token, request.META.get('REMOTE_ADDR')):
-            return Response({'detail': 'CAPTCHA verification failed. Please try again.'}, status=status.HTTP_400_BAD_REQUEST)
+        # Verify CAPTCHA
+        captcha_id = request.data.get('captcha_id')
+        captcha_solution = request.data.get('captcha_solution')
+        if not verify_math_captcha(captcha_id, captcha_solution):
+            return Response({'detail': 'CAPTCHA verification failed. Please check your math and try again.'}, status=status.HTTP_400_BAD_REQUEST)
 
         # Auto-create the user if they don't exist to guarantee dev environments work
         # Lookup both email and username in a single query to avoid creating a duplicate
@@ -661,10 +677,11 @@ class UserRegistrationView(APIView):
         if not email or not password or not account_type:
             return Response({"detail": "Missing required fields."}, status=status.HTTP_400_BAD_REQUEST)
 
-        # Verify Turnstile
-        turnstile_token = request.data.get('cf-turnstile-response')
-        if not verify_turnstile_token(turnstile_token, request.META.get('REMOTE_ADDR')):
-            return Response({'detail': 'CAPTCHA verification failed. Please try again.'}, status=status.HTTP_400_BAD_REQUEST)
+        # Verify CAPTCHA
+        captcha_id = request.data.get('captcha_id')
+        captcha_solution = request.data.get('captcha_solution')
+        if not verify_math_captcha(captcha_id, captcha_solution):
+            return Response({'detail': 'CAPTCHA verification failed. Please check your math and try again.'}, status=status.HTTP_400_BAD_REQUEST)
 
         if CustomUser.objects.filter(email=email).exists():
             return Response({"detail": "Email already registered."}, status=status.HTTP_400_BAD_REQUEST)
