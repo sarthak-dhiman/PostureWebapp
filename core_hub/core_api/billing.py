@@ -87,9 +87,6 @@ class CreateSubscriptionView(APIView):
             )
 
             return Response({'subscription_id': subscription['id']})
-            
-        except razorpay.errors.BadRequestError as e:
-            return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
         except Exception as e:
             return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
@@ -172,8 +169,8 @@ class CustomerPortalView(APIView):
                 status=status.HTTP_400_BAD_REQUEST
             )
 
-           if not cashfree_client.is_configured():
-               return Response({"detail": "Cashfree client not configured."}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        if not cashfree_client.is_configured():
+            return Response({"detail": "Cashfree client not configured."}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
         try:
             portal = cashfree_client.fetch_subscription_portal_url(org.razorpay_subscription_id)
