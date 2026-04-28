@@ -103,7 +103,7 @@ export function MockPaymentModal({ isOpen, onClose, planName, subscriptionId, or
                         Confirm {planName}
                     </h2>
                     <p className="text-sm text-slate-500 mb-8 leading-relaxed">
-                        You are testing the Posture OS checkout flow. Since no payment gateway keys are configured, you can click the button below to simulate a successful payment notification from Razorpay.
+                        You are testing the Posture OS checkout flow. Since no payment gateway keys are configured, you can click the button below to simulate a successful payment notification from Cashfree.
                     </p>
 
                     <div className="space-y-4">

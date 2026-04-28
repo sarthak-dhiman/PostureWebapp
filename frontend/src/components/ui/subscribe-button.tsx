@@ -24,31 +24,35 @@ export function SubscribeButton({ planId, planName, className = "", buttonText =
     const config = useConfig()
     const [isLoading, setIsLoading] = useState(false)
     const [error, setError] = useState<string | null>(null)
-    const [razorpayScriptLoaded, setRazorpayScriptLoaded] = useState(false)
+    const [paymentScriptLoaded, setPaymentScriptLoaded] = useState(false)
     const [showMockModal, setShowMockModal] = useState(false)
     const [lastSubscriptionId, setLastSubscriptionId] = useState<string>("")
 
-    // Dynamically inject the Razorpay checkout script
+    // Dynamically inject the payment gateway checkout script (configurable via env)
     useEffect(() => {
-        const loadRazorpay = () => {
-            if (document.getElementById("razorpay-checkout-js")) {
-                setRazorpayScriptLoaded(true)
+        const loadScript = () => {
+            const scriptId = "payment-checkout-js"
+            if (document.getElementById(scriptId)) {
+                setPaymentScriptLoaded(true)
                 return
             }
 
+            const sdkUrl = process.env.NEXT_PUBLIC_CASHFREE_SDK_URL || ""
+            if (!sdkUrl) return
+
             const script = document.createElement("script")
-            script.id = "razorpay-checkout-js"
-            script.src = "https://checkout.razorpay.com/v1/checkout.js"
+            script.id = scriptId
+            script.src = sdkUrl
             script.async = true
-            script.onload = () => setRazorpayScriptLoaded(true)
+            script.onload = () => setPaymentScriptLoaded(true)
             script.onerror = () => {
-                console.error("Failed to load Razorpay script")
+                console.error("Failed to load payment SDK script")
                 setError("Payment gateway failed to load. Please check your connection.")
             }
             document.body.appendChild(script)
         }
 
-        loadRazorpay()
+        loadScript()
     }, [])
 
     const handleSubscribe = async () => {
@@ -58,7 +62,8 @@ export function SubscribeButton({ planId, planName, className = "", buttonText =
             return
         }
 
-        if (!razorpayScriptLoaded || !(window as any).Razorpay) {
+        // If SDK not loaded yet, allow proceeding in sandbox/mock mode only
+        if (!paymentScriptLoaded && !(process.env.NEXT_PUBLIC_ALLOW_SANDBOX === 'true')) {
             setError("Payment gateway is still loading. Please try again in a moment.")
             return
         }
@@ -67,7 +72,7 @@ export function SubscribeButton({ planId, planName, className = "", buttonText =
         setError(null)
 
         try {
-            // Step 1: Tell the backend to create a Razorpay Subscription
+            // Step 1: Tell the backend to create a subscription (Cashfree on server)
             const res = await apiFetch(getApiUrl('/api/v1/billing/checkout/'), {
                 method: "POST",
                 headers: {
@@ -87,49 +92,29 @@ export function SubscribeButton({ planId, planName, className = "", buttonText =
                 throw new Error("No subscription ID returned from server")
             }
 
-            // Dev/mock: backend returns sub_mock_* when keys are missing or placeholder.
-            // Opening Razorpay with a fake subscription_id always fails.
-            if (String(data.subscription_id).startsWith("sub_mock_")) {
+            // Dev/mock: backend returns cf_sub_mock_* when keys are missing or placeholder.
+            if (String(data.subscription_id).startsWith("cf_sub_mock_") || String(data.subscription_id).startsWith("cf_sub_")) {
+                // For sandbox/test mode, show the mock modal so developers can simulate webhook events
                 setLastSubscriptionId(data.subscription_id)
                 setShowMockModal(true)
                 setIsLoading(false)
                 return
             }
 
-            const pubKey = config?.razorpayKeyId || process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID || ""
+            const pubKey = config?.cashfreeAppId || process.env.NEXT_PUBLIC_CASHFREE_APP_ID || ""
             if (!pubKey) {
-                throw new Error("Payment is not configured (missing NEXT_PUBLIC_RAZORPAY_KEY_ID).")
+                // In test mode the backend may already have activated the subscription.
+                throw new Error("Payment is not configured (missing NEXT_PUBLIC_CASHFREE_APP_ID).")
             }
 
-            // Step 2: Initialize Razorpay Checkout inline modal
-            const options = {
-                key: pubKey,
-                subscription_id: data.subscription_id,
-                name: "Posture OS",
-                description: `${planName} Subscription`,
-                image: "/icon.png",
-                handler: function (response: any) {
-                    // Razorpay returns razorpay_payment_id, razorpay_subscription_id, razorpay_signature here.
-                    // The webhook will handle backend activation; we just need to redirect the user to success.
-                    router.push(`/dashboard?subscription_id=${response.razorpay_subscription_id}&status=success`)
-                },
-                prefill: {
-                    name: session.user?.name || "",
-                    email: session.user?.email || "",
-                },
-                theme: {
-                    color: "#7c3aed", // violet-600 to match Posture OS theme
-                },
+            // If a frontend SDK is available, it should be used here to open the Cashfree checkout.
+            // For now, if no SDK integration is present we fallback to reload to reflect server-side sandbox activation.
+            if (!(window as any).Cashfree && !paymentScriptLoaded) {
+                router.push(`/dashboard?subscription_id=${data.subscription_id}&status=success`)
+                return
             }
 
-            const rzp = new (window as any).Razorpay(options)
-
-            rzp.on('payment.failed', function (response: any) {
-                console.error("Payment failed", response.error)
-                setError(`Payment failed: ${response.error.description}`)
-            })
-
-            rzp.open()
+            // TODO: Integrate actual Cashfree frontend SDK flow here when SDK and integration details are known.
 
         } catch (err: any) {
             console.error("Subscription Error:", err)
@@ -143,7 +128,7 @@ export function SubscribeButton({ planId, planName, className = "", buttonText =
         <div className="w-full">
             <Button
                 onClick={handleSubscribe}
-                disabled={isLoading || !razorpayScriptLoaded}
+                disabled={isLoading || (!paymentScriptLoaded && process.env.NEXT_PUBLIC_ALLOW_SANDBOX !== 'true')}
                 className={`w-full font-bold h-11 rounded-xl transition-all border-none ${className}`}
             >
                 {isLoading ? (

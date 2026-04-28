@@ -34,8 +34,8 @@ export default function RootLayout({
         className={`${geistSans.variable} ${geistMono.variable} antialiased min-h-screen bg-slate-50 flex flex-col select-none`}
       >
         <Providers config={{
-          razorpayKeyId: getEnv("NEXT_PUBLIC_RAZORPAY_KEY_ID") || "",
-          razorpayBusinessPlanId: getEnv("NEXT_PUBLIC_RAZORPAY_PLAN_BUSINESS") || "",
+          cashfreeAppId: getEnv("NEXT_PUBLIC_CASHFREE_APP_ID") || "",
+          cashfreeBusinessPlanId: getEnv("NEXT_PUBLIC_CASHFREE_PLAN_BUSINESS") || "",
         }}>
           <Navbar />
           <main className="flex-1 flex flex-col">

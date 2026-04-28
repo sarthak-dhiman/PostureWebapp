@@ -3,8 +3,8 @@
 import React, { createContext, useContext, ReactNode } from "react"
 
 interface Config {
-    razorpayKeyId: string
-    razorpayBusinessPlanId: string
+    cashfreeAppId: string
+    cashfreeBusinessPlanId: string
     // Add other public variables here if needed
 }
 

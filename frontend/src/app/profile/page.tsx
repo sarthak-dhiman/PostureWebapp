@@ -621,7 +621,7 @@ export default function ProfilePage() {
                     size="sm"
                     onClick={() => router.push("/settings")}
                   >
-                    Update Billing Details via Razorpay
+                    Update Billing Details via Cashfree
                   </Button>
                 </CardFooter>
               </Card>
@@ -893,7 +893,7 @@ export default function ProfilePage() {
                     onClick={() => router.push("/settings")}
                     className="text-violet-600 font-extrabold text-xs uppercase tracking-widest hover:bg-violet-50 hover:text-violet-700"
                   >
-                    Update via Razorpay
+                    Update via Cashfree
                   </Button>
                 </CardFooter>
               </Card>

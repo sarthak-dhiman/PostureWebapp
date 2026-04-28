@@ -71,3 +71,4 @@ User_Logins.md
 # Uncomment ONLY if you want to exclude them:
 # ========================
 # core_hub/core_api/migrations/
+APIkey.csv

@@ -124,3 +124,9 @@ USE_TZ = True
 # https://docs.djangoproject.com/en/6.0/howto/static-files/
 
 STATIC_URL = 'static/'
+
+# Read Cashfree API keys from environment variables (set these on Render)
+CASHFREE_APP_ID = os.environ.get('CASHFREE_APP_ID', '')
+CASHFREE_SECRET = os.environ.get('CASHFREE_SECRET', '')
+# Whether Cashfree client should operate in live mode. Default to False for safety.
+CASHFREE_LIVE = os.environ.get('CASHFREE_LIVE', 'False').lower() == 'true'

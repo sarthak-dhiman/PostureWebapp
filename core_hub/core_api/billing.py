@@ -1,6 +1,6 @@
-import razorpay
 import uuid
 from django.conf import settings
+from .utils.cashfree import get_client
 from django.utils import timezone
 from django.utils.decorators import method_decorator
 from django.views.decorators.csrf import csrf_exempt
@@ -14,12 +14,8 @@ from .utils.billing_logic import reset_organization_usage
 from .utils.email import send_billing_email
 from .utils.monitoring import send_system_alert
 
-# Initialize Razorpay Client globally if keys exist
-razorpay_client = None
-if getattr(settings, 'RAZORPAY_KEY_ID', '') and getattr(settings, 'RAZORPAY_KEY_SECRET', ''):
-    razorpay_client = razorpay.Client(
-        auth=(settings.RAZORPAY_KEY_ID, settings.RAZORPAY_KEY_SECRET)
-    )
+# Initialize Cashfree client
+cashfree_client = get_client()
 
 
 def _is_placeholder_plan_id(plan_id) -> bool:
@@ -30,9 +26,8 @@ def _is_placeholder_plan_id(plan_id) -> bool:
 class CreateSubscriptionView(APIView):
     """
     POST /api/v1/billing/checkout/
-    Generates a Razorpay Subscription for the authenticated user's organization.
-    Expects a `plan_id` in the request body (Razorpay's equivalent of a price_id).
-    Returns a `subscription_id` to be used by the frontend checkout script.
+    Generates a Cashfree Subscription (or a mock subscription in development).
+    Expects a `plan_id` in the request body. Returns a `subscription_id`.
     """
     permission_classes = [IsAuthenticated]
 
@@ -51,9 +46,10 @@ class CreateSubscriptionView(APIView):
             if not plan_id:
                 return Response({"detail": "plan_id is required."}, status=status.HTTP_400_BAD_REQUEST)
 
-        # Scaffold/Development Fallback bypasses Razorpay if using placeholder keys
-        if not razorpay_client or getattr(settings, 'RAZORPAY_KEY_SECRET', '').endswith('placeholder'):
-            user.organization.razorpay_subscription_id = f"sub_mock_{plan_id}"
+        # Scaffold/Development Fallback bypasses Cashfree if client not configured
+        if not cashfree_client.is_configured() or getattr(settings, 'CASHFREE_SECRET', '').endswith('placeholder'):
+            # reuse existing DB field for compatibility
+            user.organization.razorpay_subscription_id = f"cf_sub_mock_{plan_id}"
             user.organization.current_period_end = timezone.now() + timezone.timedelta(days=30)
             user.organization.save()
             # Upgrade the user to ADMIN so they can access the enterprise dashboard
@@ -62,26 +58,13 @@ class CreateSubscriptionView(APIView):
                 user.save(update_fields=['role'])
             return Response({'subscription_id': f'sub_mock_{plan_id}'})
 
-        if _is_placeholder_plan_id(plan_id):
-            return Response(
-                {
-                    "detail": (
-                        "Billing is using placeholder plan IDs (plan_mock_*). Razorpay does not know these IDs. "
-                        "Create plans in the Razorpay Dashboard, then set NEXT_PUBLIC_RAZORPAY_PLAN_WEBCAM_MO, "
-                        "NEXT_PUBLIC_RAZORPAY_PLAN_HEALTH_MO, NEXT_PUBLIC_RAZORPAY_PLAN_COMBO_*, etc. "
-                        "to those plan IDs and rebuild the frontend container."
-                    )
-                },
-                status=status.HTTP_400_BAD_REQUEST,
-            )
+        # For Cashfree we accept the plan_id from frontend; validate on server-side in a real integration
 
         try:
-            # Razorpay requires total_count (number of billing cycles). We'll set it high for "ongoing"
+            # Prepare subscription payload for Cashfree (implementation-specific)
             subscription_data = {
                 "plan_id": plan_id,
-                "total_count": 120, 
                 "quantity": user.organization.max_seats,
-                "customer_notify": 1,
                 "notes": {
                     "organization_id": str(user.organization.id)
                 }
@@ -95,8 +78,14 @@ class CreateSubscriptionView(APIView):
                 start_time = int(time.time() + timedelta(days=7).total_seconds())
                 subscription_data['start_at'] = start_time
                 
-            subscription = razorpay_client.subscription.create(subscription_data)
-            
+            # Create subscription via Cashfree client (currently mocked)
+            subscription = cashfree_client.create_subscription(
+                plan_id=plan_id,
+                quantity=user.organization.max_seats,
+                notes=subscription_data.get('notes'),
+                trial_days=7 if user.role == CustomUser.Role.SOLO else None
+            )
+
             return Response({'subscription_id': subscription['id']})
             
         except razorpay.errors.BadRequestError as e:
@@ -135,46 +124,29 @@ class GiftCheckoutSessionView(APIView):
         # Given we only have the plan ID here, we either fetch it from Razorpay
         # or have the frontend send the amount. We will fetch the plan.
         
-        if not razorpay_client or getattr(settings, 'RAZORPAY_KEY_SECRET', '').endswith('placeholder'):
+        if not cashfree_client.is_configured() or getattr(settings, 'CASHFREE_SECRET', '').endswith('placeholder'):
             import uuid
             GiftedSubscription.objects.create(
                 buyer=user,
                 recipient_email=recipient_email,
-                razorpay_order_id=f"order_test_{uuid.uuid4().hex[:16]}",
+                razorpay_order_id=f"cf_order_test_{uuid.uuid4().hex[:16]}",
                 plan_id=plan_id,
             )
             return Response({'order_id': f"order_test_mock"})
 
-        if _is_placeholder_plan_id(plan_id):
-            return Response(
-                {
-                    "detail": (
-                        "Gift checkout needs real Razorpay plan IDs, not plan_mock_* placeholders. "
-                        "Set NEXT_PUBLIC_RAZORPAY_PLAN_* env vars and rebuild the frontend."
-                    )
-                },
-                status=status.HTTP_400_BAD_REQUEST,
-            )
+        # For Cashfree, frontend should provide the amount or server must map plan_id -> amount.
 
         try:
-            # 1. Fetch Plan to get the amount
-            plan = razorpay_client.plan.fetch(plan_id)
-            amount = plan['item']['amount']
-            currency = plan['item']['currency']
-            
-            # 2. Create an Order
-            order = razorpay_client.order.create({
-                "amount": amount,
-                "currency": currency,
-                "receipt": f"gift_{user.id}",
-                "notes": {
-                    "is_gift": "true",
-                    "buyer_id": str(user.id),
-                    "recipient_email": recipient_email,
-                    "plan_id": plan_id
-                }
+            # TODO: map plan_id -> amount. For now, return a mocked Cashfree order.
+            # Amounts in existing code are handled in paise in some places; frontend should provide amount in future.
+            mocked_amount = 50000  # 500.00 as paise
+            order = cashfree_client.create_order(amount_paise=mocked_amount, currency='INR', notes={
+                'is_gift': 'true',
+                'buyer_id': str(user.id),
+                'recipient_email': recipient_email,
+                'plan_id': plan_id
             })
-            
+
             return Response({'order_id': order['id']})
             
         except Exception as e:
@@ -184,7 +156,7 @@ class GiftCheckoutSessionView(APIView):
 class CustomerPortalView(APIView):
     """
     POST /api/v1/billing/customer-portal/
-    Returns the Razorpay Subscription Short URL, allowing the user to update cards/cancel.
+    Returns a customer portal URL or documentation link for managing subscription.
     """
     permission_classes = [IsAuthenticated]
 
@@ -200,22 +172,16 @@ class CustomerPortalView(APIView):
                 status=status.HTTP_400_BAD_REQUEST
             )
 
-        if not razorpay_client:
-             return Response({"detail": "Razorpay client not configured."}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+           if not cashfree_client.is_configured():
+               return Response({"detail": "Cashfree client not configured."}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
         try:
-            subscription = razorpay_client.subscription.fetch(org.razorpay_subscription_id)
-            # Razorpay subscriptions have a 'short_url' for the customer portal 
-            short_url = subscription.get('short_url')
-            
-            if not short_url:
-                raise ValueError("Could not resolve portal URL from subscription.")
-                
-            return Response({'url': short_url})
+            portal = cashfree_client.fetch_subscription_portal_url(org.razorpay_subscription_id)
+            return Response({'url': portal.get('url'), 'is_mock': portal.get('is_mock', False)})
         except Exception as e:
             # Fallback for mock subscriptions
-            if org.razorpay_subscription_id and org.razorpay_subscription_id.startswith('sub_mock_'):
-                return Response({'url': 'https://razorpay.com/docs/billing/subscriptions/portal/', 'is_mock': True})
+            if org.razorpay_subscription_id and org.razorpay_subscription_id.startswith('cf_sub_mock_'):
+                return Response({'url': 'https://developer.cashfree.com/docs/', 'is_mock': True})
             return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 class CreateRefundView(APIView):
@@ -243,11 +209,11 @@ class CreateRefundView(APIView):
             return Response({"detail": "No organization."}, status=403)
 
         # Mock logic
-        if not razorpay_client or getattr(settings, 'RAZORPAY_KEY_SECRET', '').endswith('placeholder'):
+        if not cashfree_client.is_configured() or getattr(settings, 'CASHFREE_SECRET', '').endswith('placeholder'):
             refund = Refund.objects.create(
                 organization=org,
                 payment_id=payment_id,
-                refund_id=f"rfnd_mock_{uuid.uuid4().hex[:12]}",
+                refund_id=f"cf_rfnd_mock_{uuid.uuid4().hex[:12]}",
                 amount=amount,
                 status=Refund.StatusTypes.PENDING,
                 reason=reason
@@ -260,22 +226,12 @@ class CreateRefundView(APIView):
         try:
             # Convert amount to paise
             amount_paise = int(float(amount) * 100)
-            
-            refund_data = {
-                "amount": amount_paise,
-                "speed": "normal",
-                "notes": {
-                    "organization_id": str(org.id),
-                    "reason": reason
-                }
-            }
-            
-            rzp_refund = razorpay_client.payment.refund(payment_id, refund_data)
-            
+            cf_refund = cashfree_client.refund_payment(payment_id=payment_id, amount_paise=amount_paise, reason=reason)
+
             refund = Refund.objects.create(
                 organization=org,
                 payment_id=payment_id,
-                refund_id=rzp_refund['id'],
+                refund_id=cf_refund['id'],
                 amount=amount,
                 status=Refund.StatusTypes.PENDING,
                 reason=reason
@@ -284,15 +240,15 @@ class CreateRefundView(APIView):
             # Log Transaction
             BillingTransaction.objects.create(
                 organization=org,
-                transaction_id=rzp_refund['id'],
+                transaction_id=cf_refund['id'],
                 event_type="refund.initiated",
                 amount=-float(amount),
-                payload=rzp_refund
+                payload=cf_refund
             )
 
             return Response({
                 "status": "processed",
-                "refund_id": rzp_refund['id']
+                "refund_id": cf_refund['id']
             })
 
         except Exception as e:

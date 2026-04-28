@@ -10,3 +10,4 @@ channels
 daphne
 channels-redis
 whitenoise
+requests

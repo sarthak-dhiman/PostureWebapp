@@ -46,24 +46,14 @@ export default function SettingsPage() {
                     window.location.reload()
                     return
                 }
-                const pubKey = config?.razorpayKeyId || process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID || ""
+                const pubKey = config?.cashfreeAppId || process.env.NEXT_PUBLIC_CASHFREE_APP_ID || ""
                 if (!pubKey) {
-                    throw new Error("Payment is not configured (missing NEXT_PUBLIC_RAZORPAY_KEY_ID).")
+                    // In test mode the backend may already have activated the subscription. Notify the developer.
+                    throw new Error("Payment is not configured (missing NEXT_PUBLIC_CASHFREE_APP_ID).")
                 }
-                const options = {
-                    key: pubKey,
-                    subscription_id: data.subscription_id,
-                    name: "Posture OS",
-                    description: "Business Subscription",
-                    image: "/icon.png",
-                    handler: function (response: any) {
-                        window.location.reload()
-                    },
-                    prefill: { name: user?.name || "", email: user?.email || "" },
-                    theme: { color: "#7c3aed" },
-                }
-                const rzp = new (window as any).Razorpay(options)
-                rzp.open()
+                // NOTE: Cashfree frontend SDK integration is required here to open the checkout.
+                // For sandbox/test mode we simply reload to reflect mock subscription state.
+                window.location.reload()
             }
         } catch (err: any) {
             setCheckoutError(err.message)
@@ -105,7 +95,7 @@ export default function SettingsPage() {
         <div className="min-h-screen bg-slate-50 pt-24 pb-20">
             <div className="max-w-3xl mx-auto px-4 sm:px-6 space-y-8">
 
-                <script src="https://checkout.razorpay.com/v1/checkout.js" async></script>
+                {/* TODO: Add Cashfree Checkout SDK script when integrating frontend payments */}
 
                 {/* Header */}
                 <div>
@@ -195,7 +185,7 @@ export default function SettingsPage() {
                                 </div>
                                 {checkoutError && <p className="text-sm text-red-600 font-medium">{checkoutError}</p>}
                                 <Button
-                                    onClick={() => handleSubscribe(config?.razorpayBusinessPlanId || process.env.NEXT_PUBLIC_RAZORPAY_PLAN_BUSINESS || "plan_mock_business_mo")}
+                                    onClick={() => handleSubscribe(config?.cashfreeBusinessPlanId || process.env.NEXT_PUBLIC_CASHFREE_PLAN_BUSINESS || "plan_mock_business_mo")}
                                     disabled={loadingCheckout}
                                     className="w-full bg-gradient-to-r from-violet-600 to-indigo-600 text-white font-bold h-11 rounded-xl hover:opacity-90 shadow-lg shadow-violet-500/20"
                                 >
@@ -254,7 +244,7 @@ export default function SettingsPage() {
                                 {loadingPortal
                                     ? <Loader2 className="w-4 h-4 mr-2 animate-spin text-slate-500" />
                                     : <ExternalLink className="w-4 h-4 mr-2 text-slate-500" />}
-                                Manage via Razorpay Customer Portal
+                                Manage via Cashfree Portal
                             </Button>
                         </CardFooter>
                     )}

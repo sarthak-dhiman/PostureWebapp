@@ -23,7 +23,7 @@ export function GiftSubscriptionModal({ isOpen, onClose, planId, planName }: Gif
     const [recipientEmail, setRecipientEmail] = useState("")
     const [isLoading, setIsLoading] = useState(false)
     const [error, setError] = useState<string | null>(null)
-    const [razorpayScriptLoaded, setRazorpayScriptLoaded] = useState(false)
+    const [paymentScriptLoaded, setPaymentScriptLoaded] = useState(false)
     const [showMockModal, setShowMockModal] = useState(false)
     const [lastOrderId, setLastOrderId] = useState<string>("")
 
@@ -36,29 +36,32 @@ export function GiftSubscriptionModal({ isOpen, onClose, planId, planName }: Gif
         return () => window.removeEventListener('keydown', handleKeyDown)
     }, [isOpen, onClose])
 
-    // Dynamically inject the Razorpay checkout script
+    // Dynamically inject the payment gateway checkout script (configurable via env)
     useEffect(() => {
         if (!isOpen) return;
-
-        const loadRazorpay = () => {
-            if (document.getElementById("razorpay-checkout-gift-js")) {
-                setRazorpayScriptLoaded(true)
+        const loadScript = () => {
+            const scriptId = "payment-checkout-gift-js"
+            if (document.getElementById(scriptId)) {
+                setPaymentScriptLoaded(true)
                 return
             }
 
+            const sdkUrl = process.env.NEXT_PUBLIC_CASHFREE_SDK_URL || ""
+            if (!sdkUrl) return
+
             const script = document.createElement("script")
-            script.id = "razorpay-checkout-gift-js"
-            script.src = "https://checkout.razorpay.com/v1/checkout.js"
+            script.id = scriptId
+            script.src = sdkUrl
             script.async = true
-            script.onload = () => setRazorpayScriptLoaded(true)
+            script.onload = () => setPaymentScriptLoaded(true)
             script.onerror = () => {
-                console.error("Failed to load Razorpay script")
+                console.error("Failed to load payment SDK script")
                 setError("Payment gateway failed to load. Please check your connection.")
             }
             document.body.appendChild(script)
         }
 
-        loadRazorpay()
+        loadScript()
     }, [isOpen])
 
     if (!isOpen) return null
@@ -78,7 +81,7 @@ export function GiftSubscriptionModal({ isOpen, onClose, planId, planName }: Gif
             return
         }
 
-        if (!razorpayScriptLoaded || !(window as any).Razorpay) {
+        if (!paymentScriptLoaded && !(process.env.NEXT_PUBLIC_ALLOW_SANDBOX === 'true')) {
             setError("Payment gateway is still loading. Please try again in a moment.")
             return
         }
@@ -87,7 +90,7 @@ export function GiftSubscriptionModal({ isOpen, onClose, planId, planName }: Gif
         setError(null)
 
         try {
-            // Step 1: Tell the backend to create a Razorpay Order
+            // Step 1: Tell the backend to create an Order (Cashfree on server)
             const res = await apiFetch(getApiUrl('/api/v1/billing/gift/checkout/'), {
                 method: "POST",
                 headers: {
@@ -112,46 +115,20 @@ export function GiftSubscriptionModal({ isOpen, onClose, planId, planName }: Gif
 
             const orderId = String(data.order_id)
             // Backend mock path returns this; real Razorpay order ids look like order_xxx
-            if (orderId === "order_test_mock" || orderId.startsWith("order_test_")) {
+            // Backend mock path returns this; Cashfree mock ids may start with cf_order_test_
+            if (orderId === "order_test_mock" || orderId.startsWith("order_test_") || orderId.startsWith("cf_order_test_") || orderId.startsWith("cf_order_")) {
                 setLastOrderId(orderId)
                 setShowMockModal(true)
                 setIsLoading(false)
                 return
             }
-
-            const pubKey = process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID || ""
+            const pubKey = process.env.NEXT_PUBLIC_CASHFREE_APP_ID || ""
             if (!pubKey) {
-                throw new Error("Payment is not configured (missing NEXT_PUBLIC_RAZORPAY_KEY_ID).")
+                throw new Error("Payment is not configured (missing NEXT_PUBLIC_CASHFREE_APP_ID).")
             }
 
-            // Step 2: Initialize Razorpay Checkout inline modal for ONE-TIME ORDERS
-            const options = {
-                key: pubKey,
-                order_id: data.order_id,
-                name: "Posture OS",
-                description: `Gift: ${planName}`,
-                image: "/icon.png",
-                handler: function (response: any) {
-                    onClose()
-                    router.push(`/pricing?gift_success=true`)
-                },
-                prefill: {
-                    name: session.user?.name || "",
-                    email: session.user?.email || "",
-                },
-                theme: {
-                    color: "#7c3aed",
-                },
-            }
-
-            const rzp = new (window as any).Razorpay(options)
-
-            rzp.on('payment.failed', function (response: any) {
-                console.error("Gift Payment failed", response.error)
-                setError(`Payment failed: ${response.error.description}`)
-            })
-
-            rzp.open()
+            // TODO: Implement Cashfree frontend checkout for one-off orders.
+            // For now in sandbox mode, we show the mock modal / simulate flow above.
 
         } catch (err: any) {
             console.error("Gift Subscription Error:", err)
@@ -225,7 +202,7 @@ export function GiftSubscriptionModal({ isOpen, onClose, planId, planName }: Gif
                             <Button
                                 type="submit"
                                 className="w-full bg-violet-600 hover:bg-violet-700 text-white font-bold shadow-md shadow-violet-500/20"
-                                disabled={isLoading || !razorpayScriptLoaded}
+                                disabled={isLoading || (!paymentScriptLoaded && process.env.NEXT_PUBLIC_ALLOW_SANDBOX !== 'true')}
                             >
                                 {isLoading ? (
                                     <>

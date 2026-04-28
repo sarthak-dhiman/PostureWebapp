@@ -33,23 +33,23 @@ function PricingContent() {
         combo: { monthly: "1.50", quarterly: "3", yearly: "8" }
     }
 
-    const razorpayPlanIds = {
+    const cashfreePlanIds = {
         webcam: {
-            monthly: process.env.NEXT_PUBLIC_RAZORPAY_PLAN_WEBCAM_MO || "plan_mock_webcam_mo",
-            quarterly: process.env.NEXT_PUBLIC_RAZORPAY_PLAN_WEBCAM_QTR || "plan_mock_webcam_qtr",
-            yearly: process.env.NEXT_PUBLIC_RAZORPAY_PLAN_WEBCAM_YR || "plan_mock_webcam_yr"
+            monthly: process.env.NEXT_PUBLIC_CASHFREE_PLAN_WEBCAM_MO || "plan_mock_webcam_mo",
+            quarterly: process.env.NEXT_PUBLIC_CASHFREE_PLAN_WEBCAM_QTR || "plan_mock_webcam_qtr",
+            yearly: process.env.NEXT_PUBLIC_CASHFREE_PLAN_WEBCAM_YR || "plan_mock_webcam_yr"
         },
         health: {
-            monthly: process.env.NEXT_PUBLIC_RAZORPAY_PLAN_HEALTH_MO || "plan_mock_health_mo",
-            quarterly: process.env.NEXT_PUBLIC_RAZORPAY_PLAN_HEALTH_QTR || "plan_mock_health_qtr",
-            yearly: process.env.NEXT_PUBLIC_RAZORPAY_PLAN_HEALTH_YR || "plan_mock_health_yr"
+            monthly: process.env.NEXT_PUBLIC_CASHFREE_PLAN_HEALTH_MO || "plan_mock_health_mo",
+            quarterly: process.env.NEXT_PUBLIC_CASHFREE_PLAN_HEALTH_QTR || "plan_mock_health_qtr",
+            yearly: process.env.NEXT_PUBLIC_CASHFREE_PLAN_HEALTH_YR || "plan_mock_health_yr"
         },
         combo: {
-            monthly: process.env.NEXT_PUBLIC_RAZORPAY_PLAN_COMBO_MO || "plan_mock_combo_mo",
-            quarterly: process.env.NEXT_PUBLIC_RAZORPAY_PLAN_COMBO_QTR || "plan_mock_combo_qtr",
-            yearly: process.env.NEXT_PUBLIC_RAZORPAY_PLAN_COMBO_YR || "plan_mock_combo_yr"
+            monthly: process.env.NEXT_PUBLIC_CASHFREE_PLAN_COMBO_MO || "plan_mock_combo_mo",
+            quarterly: process.env.NEXT_PUBLIC_CASHFREE_PLAN_COMBO_QTR || "plan_mock_combo_qtr",
+            yearly: process.env.NEXT_PUBLIC_CASHFREE_PLAN_COMBO_YR || "plan_mock_combo_yr"
         },
-        business: process.env.NEXT_PUBLIC_RAZORPAY_PLAN_BUSINESS || "plan_mock_business_mo"
+        business: process.env.NEXT_PUBLIC_CASHFREE_PLAN_BUSINESS || "plan_mock_business_mo"
     }
 
     const periodLabels = { monthly: "/mo", quarterly: "/qtr", yearly: "/yr" }
@@ -132,7 +132,7 @@ function PricingContent() {
                         ]}
                         buttonText="Start Free Trial"
                         href={`/signup?plan=webcam&cycle=${cycle}`}
-                        priceId={razorpayPlanIds.webcam[cycle]}
+                        priceId={cashfreePlanIds.webcam[cycle]}
                     />
 
                     {/* Tier 2: Disease AI */}
@@ -151,7 +151,7 @@ function PricingContent() {
                         ]}
                         buttonText="Start Free Trial"
                         href={`/signup?plan=health&cycle=${cycle}`}
-                        priceId={razorpayPlanIds.health[cycle]}
+                        priceId={cashfreePlanIds.health[cycle]}
                     />
 
                     {/* Tier 3: Combo */}
@@ -172,7 +172,7 @@ function PricingContent() {
                         ]}
                         buttonText="Get The Combo"
                         href={`/signup?plan=combo&cycle=${cycle}`}
-                        priceId={razorpayPlanIds.combo[cycle]}
+                        priceId={cashfreePlanIds.combo[cycle]}
                     />
                 </div>
             )}
@@ -197,7 +197,7 @@ function PricingContent() {
                         ]}
                         buttonText="Get Started"
                         href="/signup?plan=business"
-                        priceId={razorpayPlanIds.business}
+                        priceId={cashfreePlanIds.business}
                     />
 
                     <PricingCard
