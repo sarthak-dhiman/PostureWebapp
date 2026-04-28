@@ -2,43 +2,37 @@
 import { useSubscription } from "@/hooks/useSubscription"
 import { useRouter } from "next/navigation"
 import { useEffect } from "react"
-import { Download, Camera, ShieldCheck, Zap, Server, Activity, ArrowRight, LayoutDashboard } from "lucide-react"
+import { Download, Camera, ShieldCheck, Zap, Server, Activity, ArrowRight, LayoutDashboard, Loader2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 
 export default function CCTVProductPage() {
     const { sessionStatus, isLoading, hasSubscription, user, isAdmin } = useSubscription()
     const router = useRouter()
 
-    // Moved redirect logic into a useEffect for page-level access control
-    useEffect(() => {
-        if (isLoading) return // Do nothing while session is loading
-
+    const handleDownload = () => {
+        if (isLoading) return
         if (sessionStatus === "unauthenticated" || !user) {
             router.push("/login?callbackUrl=/cctv")
             return
         }
-
-        if (sessionStatus === "authenticated" && !hasSubscription && !isAdmin) {
+        if (!hasSubscription && !isAdmin) {
             router.push("/settings?error=subscription_required&feature=cctv")
             return
         }
-    }, [sessionStatus, isLoading, hasSubscription, isAdmin, user, router])
-
-    // Render nothing until authentication and authorization checks are complete
-    if (isLoading || sessionStatus === "unauthenticated" || !user || (!hasSubscription && !isAdmin)) {
-        return null
-    }
-
-    const handleDownload = () => {
-        // This function will only be called if the useEffect above has passed,
-        // meaning the user is authenticated and authorized.
         alert("Preparing your download for Posture CCTV Node v2.0.1 (Linux/Windows)...")
         // In a real scenario: window.location.href = "https://cdn.posturehub.com/cctv-node-setup.zip"
     }
 
     const handleDashboard = () => {
-        // This function will only be called if the useEffect above has passed,
-        // meaning the user is authenticated and authorized.
+        if (isLoading) return
+        if (sessionStatus === "unauthenticated" || !user) {
+            router.push("/login?callbackUrl=/cctv")
+            return
+        }
+        if (!hasSubscription && !isAdmin) {
+            router.push("/settings?error=subscription_required&feature=cctv")
+            return
+        }
         router.push("/dashboard")
     }
 
@@ -69,20 +63,22 @@ export default function CCTVProductPage() {
                         <div className="flex flex-col sm:flex-row gap-4 mb-12">
                             <Button
                                 onClick={handleDownload}
+                                disabled={isLoading}
                                 size="lg"
-                                className="bg-slate-900 hover:bg-slate-800 text-white font-bold h-14 px-8 rounded-2xl shadow-xl shadow-slate-900/10 flex items-center gap-3 transition-transform hover:scale-105 active:scale-95 group"
+                                className="bg-slate-900 hover:bg-slate-800 text-white font-bold h-14 px-8 rounded-2xl shadow-xl shadow-slate-900/10 flex items-center gap-3 transition-transform hover:scale-105 active:scale-95 group disabled:opacity-70 disabled:pointer-events-none"
                             >
-                                <Download className="w-5 h-5 group-hover:animate-bounce" />
+                                {isLoading ? <Loader2 className="w-5 h-5 animate-spin" /> : <Download className="w-5 h-5 group-hover:animate-bounce" />}
                                 Download CCTV Node
                             </Button>
 
                             <Button
                                 onClick={handleDashboard}
+                                disabled={isLoading}
                                 size="lg"
                                 variant="outline"
-                                className="bg-white border-slate-200 text-slate-800 font-bold h-14 px-8 rounded-2xl hover:bg-blue-50 transition-colors flex items-center gap-3"
+                                className="bg-white border-slate-200 text-slate-800 font-bold h-14 px-8 rounded-2xl hover:bg-blue-50 transition-colors flex items-center gap-3 disabled:opacity-70 disabled:pointer-events-none"
                             >
-                                <LayoutDashboard className="w-5 h-5 text-blue-600" />
+                                {isLoading ? <Loader2 className="w-5 h-5 animate-spin text-blue-600" /> : <LayoutDashboard className="w-5 h-5 text-blue-600" />}
                                 Open Dashboard
                             </Button>
                         </div>
