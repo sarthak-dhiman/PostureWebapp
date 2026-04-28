@@ -27,6 +27,7 @@ export function SubscribeButton({ planId, planName, className = "", buttonText =
     const [paymentScriptLoaded, setPaymentScriptLoaded] = useState(false)
     const [showMockModal, setShowMockModal] = useState(false)
     const [lastSubscriptionId, setLastSubscriptionId] = useState<string>("")
+    const allowSandbox = (typeof window !== 'undefined' && (window as any).__ALLOW_SANDBOX === 'true') || process.env.NEXT_PUBLIC_ALLOW_SANDBOX === 'true'
 
     // Dynamically inject the payment gateway checkout script (configurable via env)
     useEffect(() => {
@@ -63,7 +64,7 @@ export function SubscribeButton({ planId, planName, className = "", buttonText =
         }
 
         // If SDK not loaded yet, allow proceeding in sandbox/mock mode only
-        if (!paymentScriptLoaded && !(process.env.NEXT_PUBLIC_ALLOW_SANDBOX === 'true')) {
+        if (!paymentScriptLoaded && !allowSandbox) {
             setError("Payment gateway is still loading. Please try again in a moment.")
             return
         }
@@ -128,7 +129,7 @@ export function SubscribeButton({ planId, planName, className = "", buttonText =
         <div className="w-full">
             <Button
                 onClick={handleSubscribe}
-                disabled={isLoading || (!paymentScriptLoaded && process.env.NEXT_PUBLIC_ALLOW_SANDBOX !== 'true')}
+                disabled={isLoading || (!paymentScriptLoaded && !allowSandbox)}
                 className={`w-full font-bold h-11 rounded-xl transition-all border-none ${className}`}
             >
                 {isLoading ? (

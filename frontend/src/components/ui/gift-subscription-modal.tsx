@@ -26,6 +26,7 @@ export function GiftSubscriptionModal({ isOpen, onClose, planId, planName }: Gif
     const [paymentScriptLoaded, setPaymentScriptLoaded] = useState(false)
     const [showMockModal, setShowMockModal] = useState(false)
     const [lastOrderId, setLastOrderId] = useState<string>("")
+    const allowSandbox = (typeof window !== 'undefined' && (window as any).__ALLOW_SANDBOX === 'true') || process.env.NEXT_PUBLIC_ALLOW_SANDBOX === 'true'
 
     // Handle Escape key
     useEffect(() => {
@@ -81,7 +82,7 @@ export function GiftSubscriptionModal({ isOpen, onClose, planId, planName }: Gif
             return
         }
 
-        if (!paymentScriptLoaded && !(process.env.NEXT_PUBLIC_ALLOW_SANDBOX === 'true')) {
+        if (!paymentScriptLoaded && !allowSandbox) {
             setError("Payment gateway is still loading. Please try again in a moment.")
             return
         }
@@ -202,7 +203,7 @@ export function GiftSubscriptionModal({ isOpen, onClose, planId, planName }: Gif
                             <Button
                                 type="submit"
                                 className="w-full bg-violet-600 hover:bg-violet-700 text-white font-bold shadow-md shadow-violet-500/20"
-                                disabled={isLoading || (!paymentScriptLoaded && process.env.NEXT_PUBLIC_ALLOW_SANDBOX !== 'true')}
+                                disabled={isLoading || (!paymentScriptLoaded && !allowSandbox)}
                             >
                                 {isLoading ? (
                                     <>
