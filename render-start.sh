@@ -1,8 +1,9 @@
 #!/bin/sh
 set -eu
 
-# Load production environment variables if present
-if [ -f .env.production ]; then
+# Render dashboard environment variables are the production source of truth.
+# Local/file-based loading is opt-in so a copied .env.production cannot override Render values.
+if [ "${LOAD_DOTENV_PRODUCTION:-false}" = "true" ] && [ -f .env.production ]; then
   echo "Loading environment from .env.production"
   set -a
   . ./.env.production

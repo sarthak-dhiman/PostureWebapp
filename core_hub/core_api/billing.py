@@ -49,14 +49,15 @@ class CreateSubscriptionView(APIView):
         # Scaffold/Development Fallback bypasses Cashfree if client not configured
         if not cashfree_client.is_configured() or getattr(settings, 'CASHFREE_SECRET', '').endswith('placeholder'):
             # reuse existing DB field for compatibility
-            user.organization.razorpay_subscription_id = f"cf_sub_mock_{plan_id}"
+            subscription_id = f"cf_sub_mock_{plan_id}"
+            user.organization.razorpay_subscription_id = subscription_id
             user.organization.current_period_end = timezone.now() + timezone.timedelta(days=30)
             user.organization.save()
             # Upgrade the user to ADMIN so they can access the enterprise dashboard
             if user.role != CustomUser.Role.ADMIN:
                 user.role = CustomUser.Role.ADMIN
                 user.save(update_fields=['role'])
-            return Response({'subscription_id': f'sub_mock_{plan_id}'})
+            return Response({'subscription_id': subscription_id})
 
         # For Cashfree we accept the plan_id from frontend; validate on server-side in a real integration
 
@@ -123,13 +124,14 @@ class GiftCheckoutSessionView(APIView):
         
         if not cashfree_client.is_configured() or getattr(settings, 'CASHFREE_SECRET', '').endswith('placeholder'):
             import uuid
+            order_id = f"cf_order_test_{uuid.uuid4().hex[:16]}"
             GiftedSubscription.objects.create(
                 buyer=user,
                 recipient_email=recipient_email,
-                razorpay_order_id=f"cf_order_test_{uuid.uuid4().hex[:16]}",
+                razorpay_order_id=order_id,
                 plan_id=plan_id,
             )
-            return Response({'order_id': f"order_test_mock"})
+            return Response({'order_id': order_id})
 
         # For Cashfree, frontend should provide the amount or server must map plan_id -> amount.
 

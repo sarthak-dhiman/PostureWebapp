@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button"
 import { SubscribeButton } from "@/components/ui/subscribe-button"
 import { GiftSubscriptionModal } from "@/components/ui/gift-subscription-modal"
 import { useSearchParams } from "next/navigation"
+import { useConfig } from "@/context/config-context"
 
 export default function PricingPage() {
     return (
@@ -17,6 +18,7 @@ export default function PricingPage() {
 
 function PricingContent() {
     const searchParams = useSearchParams()
+    const config = useConfig()
     const type = searchParams.get("type")
     const [view, setView] = useState<"solo" | "enterprise">("solo")
     const [cycle, setCycle] = useState<"monthly" | "quarterly" | "yearly">("monthly")
@@ -35,21 +37,21 @@ function PricingContent() {
 
     const cashfreePlanIds = {
         webcam: {
-            monthly: process.env.NEXT_PUBLIC_CASHFREE_PLAN_WEBCAM_MO || "plan_mock_webcam_mo",
-            quarterly: process.env.NEXT_PUBLIC_CASHFREE_PLAN_WEBCAM_QTR || "plan_mock_webcam_qtr",
-            yearly: process.env.NEXT_PUBLIC_CASHFREE_PLAN_WEBCAM_YR || "plan_mock_webcam_yr"
+            monthly: config?.cashfreePlanWebcamMo || process.env.NEXT_PUBLIC_CASHFREE_PLAN_WEBCAM_MO || "plan_mock_webcam_mo",
+            quarterly: config?.cashfreePlanWebcamQtr || process.env.NEXT_PUBLIC_CASHFREE_PLAN_WEBCAM_QTR || "plan_mock_webcam_qtr",
+            yearly: config?.cashfreePlanWebcamYr || process.env.NEXT_PUBLIC_CASHFREE_PLAN_WEBCAM_YR || "plan_mock_webcam_yr"
         },
         health: {
-            monthly: process.env.NEXT_PUBLIC_CASHFREE_PLAN_HEALTH_MO || "plan_mock_health_mo",
-            quarterly: process.env.NEXT_PUBLIC_CASHFREE_PLAN_HEALTH_QTR || "plan_mock_health_qtr",
-            yearly: process.env.NEXT_PUBLIC_CASHFREE_PLAN_HEALTH_YR || "plan_mock_health_yr"
+            monthly: config?.cashfreePlanHealthMo || process.env.NEXT_PUBLIC_CASHFREE_PLAN_HEALTH_MO || "plan_mock_health_mo",
+            quarterly: config?.cashfreePlanHealthQtr || process.env.NEXT_PUBLIC_CASHFREE_PLAN_HEALTH_QTR || "plan_mock_health_qtr",
+            yearly: config?.cashfreePlanHealthYr || process.env.NEXT_PUBLIC_CASHFREE_PLAN_HEALTH_YR || "plan_mock_health_yr"
         },
         combo: {
-            monthly: process.env.NEXT_PUBLIC_CASHFREE_PLAN_COMBO_MO || "plan_mock_combo_mo",
-            quarterly: process.env.NEXT_PUBLIC_CASHFREE_PLAN_COMBO_QTR || "plan_mock_combo_qtr",
-            yearly: process.env.NEXT_PUBLIC_CASHFREE_PLAN_COMBO_YR || "plan_mock_combo_yr"
+            monthly: config?.cashfreePlanComboMo || process.env.NEXT_PUBLIC_CASHFREE_PLAN_COMBO_MO || "plan_mock_combo_mo",
+            quarterly: config?.cashfreePlanComboQtr || process.env.NEXT_PUBLIC_CASHFREE_PLAN_COMBO_QTR || "plan_mock_combo_qtr",
+            yearly: config?.cashfreePlanComboYr || process.env.NEXT_PUBLIC_CASHFREE_PLAN_COMBO_YR || "plan_mock_combo_yr"
         },
-        business: process.env.NEXT_PUBLIC_CASHFREE_PLAN_BUSINESS || "plan_mock_business_mo"
+        business: config?.cashfreeBusinessPlanId || process.env.NEXT_PUBLIC_CASHFREE_PLAN_BUSINESS || "plan_mock_business_mo"
     }
 
     const periodLabels = { monthly: "/mo", quarterly: "/qtr", yearly: "/yr" }

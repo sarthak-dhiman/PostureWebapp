@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { apiFetch, getApiUrl } from "@/lib/api"
 import { MockPaymentModal } from "./mock-payment-modal"
+import { useConfig } from "@/context/config-context"
 
 interface GiftSubscriptionModalProps {
     isOpen: boolean
@@ -16,9 +17,21 @@ interface GiftSubscriptionModalProps {
     planName: string
 }
 
+type AccessSession = {
+    accessToken?: string
+    user?: {
+        accessToken?: string
+    }
+}
+
+type SandboxWindow = Window & typeof globalThis & {
+    __ALLOW_SANDBOX?: string
+}
+
 export function GiftSubscriptionModal({ isOpen, onClose, planId, planName }: GiftSubscriptionModalProps) {
     const { data: session, status } = useSession()
     const router = useRouter()
+    const config = useConfig()
 
     const [recipientEmail, setRecipientEmail] = useState("")
     const [isLoading, setIsLoading] = useState(false)
@@ -26,7 +39,10 @@ export function GiftSubscriptionModal({ isOpen, onClose, planId, planName }: Gif
     const [paymentScriptLoaded, setPaymentScriptLoaded] = useState(false)
     const [showMockModal, setShowMockModal] = useState(false)
     const [lastOrderId, setLastOrderId] = useState<string>("")
-    const allowSandbox = (typeof window !== 'undefined' && (window as any).__ALLOW_SANDBOX === 'true') || process.env.NEXT_PUBLIC_ALLOW_SANDBOX === 'true'
+    const accessSession = session as AccessSession | null
+    const token = accessSession?.user?.accessToken || accessSession?.accessToken || ""
+    const allowSandbox = config?.allowSandbox || (typeof window !== 'undefined' && (window as SandboxWindow).__ALLOW_SANDBOX === 'true') || process.env.NEXT_PUBLIC_ALLOW_SANDBOX === 'true'
+    const cashfreeSdkUrl = config?.cashfreeSdkUrl || process.env.NEXT_PUBLIC_CASHFREE_SDK_URL || ""
 
     // Handle Escape key
     useEffect(() => {
@@ -47,7 +63,7 @@ export function GiftSubscriptionModal({ isOpen, onClose, planId, planName }: Gif
                 return
             }
 
-            const sdkUrl = process.env.NEXT_PUBLIC_CASHFREE_SDK_URL || ""
+            const sdkUrl = cashfreeSdkUrl
             if (!sdkUrl) return
 
             const script = document.createElement("script")
@@ -63,7 +79,7 @@ export function GiftSubscriptionModal({ isOpen, onClose, planId, planName }: Gif
         }
 
         loadScript()
-    }, [isOpen])
+    }, [isOpen, cashfreeSdkUrl])
 
     if (!isOpen) return null
 
@@ -96,7 +112,7 @@ export function GiftSubscriptionModal({ isOpen, onClose, planId, planName }: Gif
                 method: "POST",
                 headers: {
                     "Content-Type": "application/json",
-                    Authorization: `Bearer ${(session?.user as any)?.accessToken || (session as any)?.accessToken}`,
+                    Authorization: `Bearer ${token}`,
                 },
                 body: JSON.stringify({
                     plan_id: planId,
@@ -123,7 +139,7 @@ export function GiftSubscriptionModal({ isOpen, onClose, planId, planName }: Gif
                 setIsLoading(false)
                 return
             }
-            const pubKey = process.env.NEXT_PUBLIC_CASHFREE_APP_ID || ""
+            const pubKey = config?.cashfreeAppId || process.env.NEXT_PUBLIC_CASHFREE_APP_ID || ""
             if (!pubKey) {
                 throw new Error("Payment is not configured (missing NEXT_PUBLIC_CASHFREE_APP_ID).")
             }
@@ -131,9 +147,9 @@ export function GiftSubscriptionModal({ isOpen, onClose, planId, planName }: Gif
             // TODO: Implement Cashfree frontend checkout for one-off orders.
             // For now in sandbox mode, we show the mock modal / simulate flow above.
 
-        } catch (err: any) {
+        } catch (err: unknown) {
             console.error("Gift Subscription Error:", err)
-            setError(err.message)
+            setError(err instanceof Error ? err.message : "Failed to initialize gift order")
         } finally {
             setIsLoading(false)
         }
@@ -165,13 +181,13 @@ export function GiftSubscriptionModal({ isOpen, onClose, planId, planName }: Gif
                         Gift {planName}
                     </h2>
                     <p className="text-sm text-slate-500 mb-6 leading-relaxed">
-                        Send a Posture OS subscription to a friend or colleague. They will receive an email invitation to claim it. If they don't accept within 15 days, you'll be automatically refunded.
+                        Send a Posture OS subscription to a friend or colleague. They will receive an email invitation to claim it. If they do not accept within 15 days, you will be automatically refunded.
                     </p>
 
                     <form onSubmit={handleGift} className="space-y-6">
                         <div className="space-y-2">
                             <label htmlFor="recipientEmail" className="text-sm font-bold text-slate-900">
-                                Recipient's Email
+                                Recipient Email
                             </label>
                             <Input
                                 id="recipientEmail"
@@ -224,7 +240,7 @@ export function GiftSubscriptionModal({ isOpen, onClose, planId, planName }: Gif
                 onClose={() => setShowMockModal(false)}
                 planName={`Gift: ${planName}`}
                 orderId={lastOrderId}
-                token={(session?.user as any)?.accessToken || (session as any)?.accessToken}
+                token={token}
             />
         </div>
     )

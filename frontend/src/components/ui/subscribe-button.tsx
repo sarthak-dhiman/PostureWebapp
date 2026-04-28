@@ -18,6 +18,18 @@ interface SubscribeButtonProps {
     amount?: number // Used for display context if needed
 }
 
+type AccessSession = {
+    accessToken?: string
+    user?: {
+        accessToken?: string
+    }
+}
+
+type SandboxWindow = Window & typeof globalThis & {
+    __ALLOW_SANDBOX?: string
+    Cashfree?: unknown
+}
+
 export function SubscribeButton({ planId, planName, className = "", buttonText = "Subscribe", fallbackUrl }: SubscribeButtonProps) {
     const { data: session, status } = useSession()
     const router = useRouter()
@@ -27,7 +39,10 @@ export function SubscribeButton({ planId, planName, className = "", buttonText =
     const [paymentScriptLoaded, setPaymentScriptLoaded] = useState(false)
     const [showMockModal, setShowMockModal] = useState(false)
     const [lastSubscriptionId, setLastSubscriptionId] = useState<string>("")
-    const allowSandbox = (typeof window !== 'undefined' && (window as any).__ALLOW_SANDBOX === 'true') || process.env.NEXT_PUBLIC_ALLOW_SANDBOX === 'true'
+    const accessSession = session as AccessSession | null
+    const token = accessSession?.user?.accessToken || accessSession?.accessToken || ""
+    const allowSandbox = config?.allowSandbox || (typeof window !== 'undefined' && (window as SandboxWindow).__ALLOW_SANDBOX === 'true') || process.env.NEXT_PUBLIC_ALLOW_SANDBOX === 'true'
+    const cashfreeSdkUrl = config?.cashfreeSdkUrl || process.env.NEXT_PUBLIC_CASHFREE_SDK_URL || ""
 
     // Dynamically inject the payment gateway checkout script (configurable via env)
     useEffect(() => {
@@ -38,7 +53,7 @@ export function SubscribeButton({ planId, planName, className = "", buttonText =
                 return
             }
 
-            const sdkUrl = process.env.NEXT_PUBLIC_CASHFREE_SDK_URL || ""
+            const sdkUrl = cashfreeSdkUrl
             if (!sdkUrl) return
 
             const script = document.createElement("script")
@@ -54,7 +69,7 @@ export function SubscribeButton({ planId, planName, className = "", buttonText =
         }
 
         loadScript()
-    }, [])
+    }, [cashfreeSdkUrl])
 
     const handleSubscribe = async () => {
         // If the user isn't logged in, redirect them to login with a callback
@@ -78,7 +93,7 @@ export function SubscribeButton({ planId, planName, className = "", buttonText =
                 method: "POST",
                 headers: {
                     "Content-Type": "application/json",
-                    Authorization: `Bearer ${(session as any)?.user?.accessToken || (session as any)?.accessToken}`,
+                    Authorization: `Bearer ${token}`,
                 },
                 body: JSON.stringify({ plan_id: planId }),
             })
@@ -93,10 +108,11 @@ export function SubscribeButton({ planId, planName, className = "", buttonText =
                 throw new Error("No subscription ID returned from server")
             }
 
-            // Dev/mock: backend returns cf_sub_mock_* when keys are missing or placeholder.
-            if (String(data.subscription_id).startsWith("cf_sub_mock_") || String(data.subscription_id).startsWith("cf_sub_")) {
+            // Dev/mock: backend may return either legacy sub_mock_* or Cashfree-style cf_sub_* ids.
+            const subscriptionId = String(data.subscription_id)
+            if (subscriptionId.startsWith("sub_mock_") || subscriptionId.startsWith("cf_sub_mock_") || subscriptionId.startsWith("cf_sub_")) {
                 // For sandbox/test mode, show the mock modal so developers can simulate webhook events
-                setLastSubscriptionId(data.subscription_id)
+                setLastSubscriptionId(subscriptionId)
                 setShowMockModal(true)
                 setIsLoading(false)
                 return
@@ -110,16 +126,16 @@ export function SubscribeButton({ planId, planName, className = "", buttonText =
 
             // If a frontend SDK is available, it should be used here to open the Cashfree checkout.
             // For now, if no SDK integration is present we fallback to reload to reflect server-side sandbox activation.
-            if (!(window as any).Cashfree && !paymentScriptLoaded) {
+            if (!(window as SandboxWindow).Cashfree && !paymentScriptLoaded) {
                 router.push(`/dashboard?subscription_id=${data.subscription_id}&status=success`)
                 return
             }
 
             // TODO: Integrate actual Cashfree frontend SDK flow here when SDK and integration details are known.
 
-        } catch (err: any) {
+        } catch (err: unknown) {
             console.error("Subscription Error:", err)
-            setError(err.message)
+            setError(err instanceof Error ? err.message : "Failed to initialize subscription")
         } finally {
             setIsLoading(false)
         }
@@ -146,7 +162,13 @@ export function SubscribeButton({ planId, planName, className = "", buttonText =
                     {error}
                 </p>
             )}
-
+            <MockPaymentModal
+                isOpen={showMockModal}
+                onClose={() => setShowMockModal(false)}
+                planName={planName}
+                subscriptionId={lastSubscriptionId}
+                token={token}
+            />
 
         </div>
     )
