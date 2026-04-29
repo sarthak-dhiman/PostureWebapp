@@ -54,9 +54,10 @@ class CreateSubscriptionView(APIView):
             user.organization.current_period_end = timezone.now() + timezone.timedelta(days=30)
             user.organization.save()
             # Upgrade the user to ADMIN so they can access the enterprise dashboard
-            if user.role != CustomUser.Role.ADMIN:
-                user.role = CustomUser.Role.ADMIN
-                user.save(update_fields=['role'])
+            if 'business' in plan_id.lower() or 'enterprise' in plan_id.lower():
+                if user.role != CustomUser.Role.ADMIN:
+                    user.role = CustomUser.Role.ADMIN
+                    user.save(update_fields=['role'])
             return Response({'subscription_id': subscription_id})
 
         # For Cashfree we accept the plan_id from frontend; validate on server-side in a real integration
@@ -279,9 +280,10 @@ class MockBillingActionView(APIView):
                 reset_organization_usage(org)
                 
                 # Elevate to Admin if solo
-                if user.role != CustomUser.Role.ADMIN:
-                    user.role = CustomUser.Role.ADMIN
-                    user.save(update_fields=['role'])
+                if 'business' in subscription_id.lower() or 'enterprise' in subscription_id.lower():
+                    if user.role != CustomUser.Role.ADMIN:
+                        user.role = CustomUser.Role.ADMIN
+                        user.save(update_fields=['role'])
                 
                 # Send Mock Email
                 send_billing_email(user, 'payment_success', {
