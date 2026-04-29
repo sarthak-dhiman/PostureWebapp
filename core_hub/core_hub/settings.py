@@ -140,6 +140,9 @@ USE_TZ = True
 STATIC_URL = 'static/'
 STATIC_ROOT = env('STATIC_ROOT', default=os.path.join(BASE_DIR, 'staticfiles'))
 
+# ─── Frontend ─────────────────────────────────────────────────────────────────
+FRONTEND_URL = env('FRONTEND_URL', default='http://localhost:3000')
+
 # ─── Default PK ───────────────────────────────────────────────────────────────
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
