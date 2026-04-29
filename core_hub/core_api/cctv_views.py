@@ -27,7 +27,7 @@ class CCTVNodeRegisterView(APIView):
         org = get_object_or_404(Organization, invite_code=invite_code)
         
         # Optional: check if org has subscription/CCTV seats here
-        has_sub = bool(org.stripe_subscription_id) or hasattr(org, 'gifted_subscription')
+        has_sub = bool(getattr(org, 'razorpay_subscription_id', None)) or hasattr(org, 'gifted_subscription')
         if not has_sub:
             return Response({"error": "Organization does not have an active enterprise subscription."}, status=status.HTTP_403_FORBIDDEN)
             

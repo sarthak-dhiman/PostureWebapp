@@ -204,11 +204,11 @@ export default function SignupPage() {
                         Solo User
                       </h3>
                       <span className="bg-green-100 text-green-700 text-[9px] uppercase font-bold px-2 py-0.5 rounded-full shrink-0 ml-2">
-                        10 Hr Free
+                        7 Day Free
                       </span>
                     </div>
                     <p className="text-xs text-slate-500">
-                      10 hrs free monitoring, then $1/mo.
+                      7 days free monitoring, then $1/mo.
                     </p>
                   </div>
                 </button>

@@ -310,60 +310,37 @@ class TestBillingEndpoints(TestCase):
         )
         self.client.credentials(HTTP_AUTHORIZATION=f'Bearer {resp.data["access"]}')
 
-    @patch('stripe.checkout.Session.create')
-    def test_create_checkout_session(self, mock_create):
-        mock_create.return_value.url = 'https://checkout.stripe.com/test'
-        
-        resp = self.client.post('/api/v1/billing/checkout/', {'price_id': 'price_123'}, format='json')
-        self.assertEqual(resp.status_code, 200)
-        self.assertEqual(resp.data['url'], 'https://checkout.stripe.com/test')
-        
-        # Ensure client_reference_id matches the org
-        mock_create.assert_called_once()
-        args, kwargs = mock_create.call_args
-        self.assertEqual(kwargs['client_reference_id'], str(self.org.id))
+    def test_create_subscription_mock(self):
+        # Simulate unconfigured Cashfree client branch which returns a mock subscription id
+        from core_api import billing as billing_module
+        from unittest.mock import patch
+
+        with patch.object(billing_module.cashfree_client, 'is_configured', return_value=False):
+            resp = self.client.post('/api/v1/billing/checkout/', {'plan_id': 'plan_mock_webcam_mo'}, format='json')
+            self.assertEqual(resp.status_code, 200)
+            self.assertIn('subscription_id', resp.data)
 
     def test_checkout_requires_price_id(self):
         resp = self.client.post('/api/v1/billing/checkout/', {}, format='json')
         self.assertEqual(resp.status_code, 400)
 
-    @patch('stripe.billing_portal.Session.create')
-    @patch('stripe.Subscription.retrieve')
-    def test_customer_portal(self, mock_retrieve, mock_create):
-        # Fake an active subscription on the org
-        self.org.razorpay_subscription_id = 'sub_123'
-        self.org.save()
-        
-        mock_retrieve.return_value.customer = 'cus_456'
-        mock_create.return_value.url = 'https://billing.stripe.com/test'
-        
-        resp = self.client.post('/api/v1/billing/portal/')
-        self.assertEqual(resp.status_code, 200)
-        self.assertEqual(resp.data['url'], 'https://billing.stripe.com/test')
+    def test_customer_portal_requires_subscription(self):
+        # Ensure portal endpoint rejects orgs without a subscription
+        resp = self.client.post('/api/v1/billing/customer-portal/')
+        self.assertEqual(resp.status_code, 400)
 
     def test_customer_portal_requires_subscription(self):
         # Org has no razorpay_subscription_id
         resp = self.client.post('/api/v1/billing/portal/')
         self.assertEqual(resp.status_code, 400)
 
-    @patch('stripe.Webhook.construct_event')
-    def test_stripe_webhook_checkout_completed(self, mock_webhook):
-        mock_webhook.return_value = {
-            'type': 'checkout.session.completed',
-            'data': {
-                'object': {
-                    'client_reference_id': str(self.org.id),
-                    'subscription': 'sub_789'
-                }
-            }
-        }
-        
-        # Webhooks don't use JWT, they use stripe signatures
-        self.client.credentials() 
-        resp = self.client.post('/api/v1/billing/webhook/', {}, format='json', HTTP_STRIPE_SIGNATURE='test_sig')
-        
+    def test_mock_billing_action_activate(self):
+        # Use mock-success endpoint to activate a subscription in dev mode
+        self.org.razorpay_subscription_id = None
+        self.org.save()
+        resp = self.client.post('/api/v1/billing/mock-success/', {'subscription_id': 'cf_sub_mock_plan_mock_webcam_mo', 'action': 'success'}, format='json')
         self.assertEqual(resp.status_code, 200)
         self.org.refresh_from_db()
-        self.assertEqual(self.org.razorpay_subscription_id, 'sub_789')
         self.assertTrue(self.org.is_active)
+        self.assertIsNotNone(self.org.razorpay_subscription_id)
 

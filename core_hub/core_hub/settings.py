@@ -21,10 +21,7 @@ SECRET_KEY = env('SECRET_KEY', default='django-insecure-change-me-in-production'
 DEBUG = env('DEBUG')
 ALLOWED_HOSTS = env('ALLOWED_HOSTS') + ['testserver']  # 'testserver' required by Django test client
 
-# ─── Stripe ───────────────────────────────────────────────────────────────────
-STRIPE_PUBLIC_KEY = env('STRIPE_PUBLIC_KEY', default='pk_test_placeholder')
-STRIPE_SECRET_KEY = env('STRIPE_SECRET_KEY', default='sk_test_placeholder')
-STRIPE_WEBHOOK_SECRET = env('STRIPE_WEBHOOK_SECRET', default='whsec_placeholder')
+# Stripe config removed — using Cashfree / Razorpay instead
 
 # ─── Razorpay (subscriptions, gifts, webhooks) ──────────────────────────────
 RAZORPAY_KEY_ID = env('RAZORPAY_KEY_ID', default='')

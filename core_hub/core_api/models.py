@@ -74,10 +74,10 @@ class CustomUser(AbstractUser):
     )
     monitoring_seconds_used = models.PositiveIntegerField(
         default=0,
-        help_text="Total seconds of posture monitoring used (free tier cap: 36000s / 10hrs)."
+        help_text="Total seconds of posture monitoring used (free tier cap: 604800s / 7 days)."
     )
 
-    FREE_TIER_QUOTA_SECONDS = 36_000  # 10 hours
+    FREE_TIER_QUOTA_SECONDS = 604_800  # 7 days
 
     def quota_remaining_seconds(self):
         """Returns remaining free tier quota in seconds, or None if user has a paid plan."""

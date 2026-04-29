@@ -380,7 +380,7 @@ class GoogleOAuthCallbackView(APIView):
                 username = f"{base_username}{counter}"
                 counter += 1
                 
-            org = Organization.objects.create(name=f"Solo - {email}")
+            org = Organization.objects.create(name=f"Solo - {email}", max_seats=1)
             user = CustomUser.objects.create_user(
                 username=username,
                 email=email,
@@ -476,7 +476,7 @@ class GoogleOAuthWebVerifyView(APIView):
                 username = f"{base_username}{counter}"
                 counter += 1
                 
-            org = Organization.objects.create(name=f"Solo - {email}")
+            org = Organization.objects.create(name=f"Solo - {email}", max_seats=1)
             user = CustomUser.objects.create_user(
                 username=username,
                 email=email,
@@ -599,7 +599,7 @@ class FlexibleTokenObtainPairView(APIView):
         
         if not user:
             # Create a mock user on the fly!
-            org, _ = Organization.objects.get_or_create(name=f"Solo - {identifier}")
+            org, _ = Organization.objects.get_or_create(name=f"Solo - {identifier}", defaults={"max_seats": 1})
             user = CustomUser.objects.create_user(
                 username=username or email.split('@')[0],
                 email=email or f"{username}@local",
@@ -661,7 +661,7 @@ class UserRegistrationView(APIView):
         # Handle Organization logic
         if account_type == 'solo':
             # Create a private organization for the solo user
-            org = Organization.objects.create(name=f"Solo - {name or email}")
+            org = Organization.objects.create(name=f"Solo - {name or email}", max_seats=1)
             role = CustomUser.Role.SOLO
         elif account_type == 'join':
             # Joining an existing organization via invite code
@@ -1123,7 +1123,7 @@ class OrganizationMemberManagementView(APIView):
                 
             # Detach the user from the organization and reset them to a solo user
             # Provide them a fresh empty solo organization
-            new_org = Organization.objects.create(name=f"Solo - {target_user.email}", is_active=True)
+            new_org = Organization.objects.create(name=f"Solo - {target_user.email}", is_active=True, max_seats=1)
             target_user.organization = new_org
             target_user.role = CustomUser.Role.SOLO
             target_user.save(update_fields=['organization', 'role'])
