@@ -22,9 +22,7 @@ export default function AnalyzerDownloadPage() {
     }
 
     const handleDownload = () => {
-        // Mock download trigger
-        alert("Preparing your download for Posture Analyzer v1.2.0 (Windows x64)...")
-        // In a real scenario: window.location.href = "https://cdn.posturehub.com/analyzer-setup.exe"
+        window.location.href = "https://drive.google.com/uc?export=download&id=1CiPTwiGiWgRjdZnnZqVOoUz-isDTzaeF"
     }
 
     return (
