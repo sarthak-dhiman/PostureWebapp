@@ -37,7 +37,12 @@ export default function ProductsPage() {
                             </div>
                         </div>
                         <div className="mt-auto space-y-3">
-                            <Link href="https://drive.google.com/uc?export=download&id=1CiPTwiGiWgRjdZnnZqVOoUz-isDTzaeF" className="flex items-center justify-between w-full bg-slate-900 hover:bg-slate-800 text-white px-4 py-3 rounded-xl font-semibold transition-colors shadow-lg shadow-slate-900/10">
+                            <Link 
+                                href="https://drive.google.com/uc?export=download&id=1CiPTwiGiWgRjdZnnZqVOoUz-isDTzaeF" 
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="flex items-center justify-between w-full bg-slate-900 hover:bg-slate-800 text-white px-4 py-3 rounded-xl font-semibold transition-colors shadow-lg shadow-slate-900/10"
+                            >
                                 Download for Windows <ArrowRight className="w-4 h-4" />
                             </Link>
                             <Link href="/demo" className="flex items-center justify-center w-full bg-slate-50 hover:bg-violet-50 text-slate-900 hover:text-violet-700 px-4 py-3 rounded-xl font-semibold transition-colors border border-slate-200 hover:border-violet-200">

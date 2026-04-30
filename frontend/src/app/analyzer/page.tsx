@@ -22,7 +22,7 @@ export default function AnalyzerDownloadPage() {
     }
 
     const handleDownload = () => {
-        window.location.href = "https://drive.google.com/uc?export=download&id=1CiPTwiGiWgRjdZnnZqVOoUz-isDTzaeF"
+        window.open("https://drive.google.com/uc?export=download&id=1CiPTwiGiWgRjdZnnZqVOoUz-isDTzaeF", "_blank")
     }
 
     return (
