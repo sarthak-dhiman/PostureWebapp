@@ -2,7 +2,7 @@
 import { useSubscription } from "@/hooks/useSubscription"
 import { useRouter } from "next/navigation"
 import { useEffect } from "react"
-import { Download, Camera, ShieldCheck, Zap, Server, Activity, ArrowRight, LayoutDashboard, Loader2 } from "lucide-react"
+import { Download, Camera, ShieldCheck, Zap, Server, Activity, ArrowRight, LayoutDashboard, Loader2, Lock } from "lucide-react"
 import { Button } from "@/components/ui/button"
 
 export default function CCTVProductPage() {
@@ -63,12 +63,18 @@ export default function CCTVProductPage() {
                         <div className="flex flex-col sm:flex-row gap-4 mb-12">
                             <Button
                                 onClick={handleDownload}
-                                disabled={isLoading}
+                                disabled={isLoading || (sessionStatus === "authenticated" && !hasSubscription && !isAdmin)}
                                 size="lg"
-                                className="bg-slate-900 hover:bg-slate-800 text-white font-bold h-14 px-8 rounded-2xl shadow-xl shadow-slate-900/10 flex items-center gap-3 transition-transform hover:scale-105 active:scale-95 group disabled:opacity-70 disabled:pointer-events-none"
+                                className="bg-slate-900 hover:bg-slate-800 text-white font-bold h-14 px-8 rounded-2xl shadow-xl shadow-slate-900/10 flex items-center gap-3 transition-transform hover:scale-105 active:scale-95 group disabled:opacity-70 disabled:pointer-events-none disabled:cursor-not-allowed"
                             >
-                                {isLoading ? <Loader2 className="w-5 h-5 animate-spin" /> : <Download className="w-5 h-5 group-hover:animate-bounce" />}
-                                Download CCTV Node
+                                {isLoading ? (
+                                    <Loader2 className="w-5 h-5 animate-spin" />
+                                ) : (sessionStatus === "authenticated" && !hasSubscription && !isAdmin) ? (
+                                    <Lock className="w-5 h-5 text-slate-400" />
+                                ) : (
+                                    <Download className="w-5 h-5 group-hover:animate-bounce" />
+                                )}
+                                {(sessionStatus === "authenticated" && !hasSubscription && !isAdmin) ? "Only for Enterprise Users" : "Download CCTV Node"}
                             </Button>
 
                             <Button

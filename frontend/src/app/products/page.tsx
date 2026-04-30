@@ -1,7 +1,12 @@
+"use client"
 import Link from "next/link"
-import { Activity, Camera, Stethoscope, ArrowRight, ShieldCheck, Zap } from "lucide-react"
+import { Activity, Camera, Stethoscope, ArrowRight, ShieldCheck, Zap, Lock, Download } from "lucide-react"
+import { useSubscription } from "@/hooks/useSubscription"
 
 export default function ProductsPage() {
+    const { sessionStatus, hasSubscription, isAdmin } = useSubscription()
+    const isEnterprise = sessionStatus === "authenticated" && (hasSubscription || isAdmin)
+
     return (
         <div className="min-h-screen bg-slate-50 pt-20">
             {/* Header */}
@@ -69,9 +74,23 @@ export default function ProductsPage() {
                                 <ShieldCheck className="w-4 h-4 text-emerald-500" /> API-Key Device Auth
                             </div>
                         </div>
-                        <Link href="/cctv" className="mt-auto flex items-center justify-between w-full bg-slate-50 hover:bg-blue-50 text-slate-900 hover:text-blue-700 px-4 py-3 rounded-xl font-semibold transition-colors border border-slate-200 hover:border-blue-200">
-                            Learn More <ArrowRight className="w-4 h-4" />
-                        </Link>
+                        <div className="mt-auto space-y-3">
+                            {(!isEnterprise && sessionStatus === "authenticated") ? (
+                                <div className="flex items-center justify-between w-full bg-slate-100 text-slate-400 px-4 py-3 rounded-xl font-semibold border border-slate-200 cursor-not-allowed">
+                                    Only for Enterprise Users <Lock className="w-4 h-4" />
+                                </div>
+                            ) : (
+                                <Link 
+                                    href="/cctv" 
+                                    className="flex items-center justify-between w-full bg-slate-900 hover:bg-slate-800 text-white px-4 py-3 rounded-xl font-semibold transition-colors shadow-lg shadow-slate-900/10"
+                                >
+                                    Download CCTV Node <Download className="w-4 h-4" />
+                                </Link>
+                            )}
+                            <Link href="/cctv" className="flex items-center justify-center w-full bg-slate-50 hover:bg-blue-50 text-slate-900 hover:text-blue-700 px-4 py-3 rounded-xl font-semibold transition-colors border border-slate-200 hover:border-blue-200">
+                                Learn More
+                            </Link>
+                        </div>
                     </div>
 
                     {/* Product 3: Medical Diagnostics */}
