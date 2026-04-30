@@ -77,6 +77,10 @@ export default function DashboardPage() {
             queryClient.invalidateQueries({ queryKey: ["orgDashboard"] })
             queryClient.invalidateQueries({ queryKey: ["userProfile"] })
             setPendingSeats(null)
+            alert("Organization capacity updated successfully.")
+        },
+        onError: (error: any) => {
+            alert(error.message || "Failed to update seats. Please check your billing settings.")
         }
     })
 
