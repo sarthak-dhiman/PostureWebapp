@@ -9,7 +9,7 @@ export default function CCTVProductPage() {
     const { sessionStatus, isLoading, hasSubscription, user, isAdmin } = useSubscription()
     const router = useRouter()
 
-    const handleDownload = () => {
+    const handleDownload = (os: string) => {
         if (isLoading) return
         if (sessionStatus === "unauthenticated" || !user) {
             router.push("/login?callbackUrl=/cctv")
@@ -19,8 +19,13 @@ export default function CCTVProductPage() {
             router.push("/settings?error=subscription_required&feature=cctv")
             return
         }
-        alert("Preparing your download for Posture CCTV Node v2.0.1 (Linux/Windows)...")
-        // In a real scenario: window.location.href = "https://cdn.posturehub.com/cctv-node-setup.zip"
+        const osNames: Record<string, string> = {
+            windows: "Windows",
+            macos: "macOS",
+            linux: "Linux"
+        }
+        alert(`Preparing your download for Posture CCTV Node v2.0.1 (${osNames[os]})...`)
+        // In a real scenario: window.location.href = `https://cdn.posturehub.com/cctv-node-setup-${os}.zip`
     }
 
     const handleDashboard = () => {
@@ -60,31 +65,63 @@ export default function CCTVProductPage() {
                             Deploy lightweight Python monitoring nodes to your existing IP cameras. Track worker ergonomics, safety compliance, and operational efficiency across your entire facility.
                         </p>
 
-                        <div className="flex flex-col sm:flex-row gap-4 mb-12">
-                            <Button
-                                onClick={handleDownload}
-                                disabled={isLoading || (sessionStatus === "authenticated" && !hasSubscription && !isAdmin)}
-                                size="lg"
-                                className="bg-slate-900 hover:bg-slate-800 text-white font-bold h-14 px-8 rounded-2xl shadow-xl shadow-slate-900/10 flex items-center gap-3 transition-transform hover:scale-105 active:scale-95 group disabled:opacity-70 disabled:pointer-events-none disabled:cursor-not-allowed"
-                            >
-                                {isLoading ? (
-                                    <Loader2 className="w-5 h-5 animate-spin" />
-                                ) : (sessionStatus === "authenticated" && !hasSubscription && !isAdmin) ? (
-                                    <Lock className="w-5 h-5 text-slate-400" />
-                                ) : (
-                                    <Download className="w-5 h-5 group-hover:animate-bounce" />
-                                )}
-                                {(sessionStatus === "authenticated" && !hasSubscription && !isAdmin) ? "Only for Enterprise Users" : "Download CCTV Node"}
-                            </Button>
+                        <div className="flex flex-col gap-5 mb-12">
+                            <div className="flex flex-wrap items-center gap-3">
+                                <Button
+                                    onClick={() => handleDownload("windows")}
+                                    disabled={isLoading || (sessionStatus === "authenticated" && !hasSubscription && !isAdmin)}
+                                    size="lg"
+                                    className="bg-slate-900 hover:bg-slate-800 text-white font-bold h-12 px-6 rounded-2xl shadow-xl shadow-slate-900/10 flex items-center gap-2 transition-transform hover:scale-105 active:scale-95 group disabled:opacity-70 disabled:pointer-events-none disabled:cursor-not-allowed"
+                                >
+                                    {isLoading ? (
+                                        <Loader2 className="w-4 h-4 animate-spin" />
+                                    ) : (sessionStatus === "authenticated" && !hasSubscription && !isAdmin) ? (
+                                        <Lock className="w-4 h-4 text-slate-400" />
+                                    ) : (
+                                        <Download className="w-4 h-4 group-hover:animate-bounce" />
+                                    )}
+                                    Windows
+                                </Button>
+                                <Button
+                                    onClick={() => handleDownload("macos")}
+                                    disabled={isLoading || (sessionStatus === "authenticated" && !hasSubscription && !isAdmin)}
+                                    size="lg"
+                                    className="bg-slate-900 hover:bg-slate-800 text-white font-bold h-12 px-6 rounded-2xl shadow-xl shadow-slate-900/10 flex items-center gap-2 transition-transform hover:scale-105 active:scale-95 group disabled:opacity-70 disabled:pointer-events-none disabled:cursor-not-allowed"
+                                >
+                                    {isLoading ? (
+                                        <Loader2 className="w-4 h-4 animate-spin" />
+                                    ) : (sessionStatus === "authenticated" && !hasSubscription && !isAdmin) ? (
+                                        <Lock className="w-4 h-4 text-slate-400" />
+                                    ) : (
+                                        <Download className="w-4 h-4 group-hover:animate-bounce" />
+                                    )}
+                                    macOS
+                                </Button>
+                                <Button
+                                    onClick={() => handleDownload("linux")}
+                                    disabled={isLoading || (sessionStatus === "authenticated" && !hasSubscription && !isAdmin)}
+                                    size="lg"
+                                    className="bg-slate-900 hover:bg-slate-800 text-white font-bold h-12 px-6 rounded-2xl shadow-xl shadow-slate-900/10 flex items-center gap-2 transition-transform hover:scale-105 active:scale-95 group disabled:opacity-70 disabled:pointer-events-none disabled:cursor-not-allowed"
+                                >
+                                    {isLoading ? (
+                                        <Loader2 className="w-4 h-4 animate-spin" />
+                                    ) : (sessionStatus === "authenticated" && !hasSubscription && !isAdmin) ? (
+                                        <Lock className="w-4 h-4 text-slate-400" />
+                                    ) : (
+                                        <Download className="w-4 h-4 group-hover:animate-bounce" />
+                                    )}
+                                    Linux
+                                </Button>
+                            </div>
 
                             <Button
                                 onClick={handleDashboard}
                                 disabled={isLoading}
                                 size="lg"
                                 variant="outline"
-                                className="bg-white border-slate-200 text-slate-800 font-bold h-14 px-8 rounded-2xl hover:bg-blue-50 transition-colors flex items-center gap-3 disabled:opacity-70 disabled:pointer-events-none"
+                                className="bg-white border-slate-200 text-slate-800 font-bold h-12 px-6 rounded-2xl hover:bg-blue-50 transition-colors flex items-center gap-2 disabled:opacity-70 disabled:pointer-events-none self-start"
                             >
-                                {isLoading ? <Loader2 className="w-5 h-5 animate-spin text-blue-600" /> : <LayoutDashboard className="w-5 h-5 text-blue-600" />}
+                                {isLoading ? <Loader2 className="w-4 h-4 animate-spin text-blue-600" /> : <LayoutDashboard className="w-4 h-4 text-blue-600" />}
                                 Open Dashboard
                             </Button>
                         </div>

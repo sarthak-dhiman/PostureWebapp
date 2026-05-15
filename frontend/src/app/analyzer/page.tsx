@@ -21,8 +21,13 @@ export default function AnalyzerDownloadPage() {
         return null
     }
 
-    const handleDownload = () => {
-        window.open("https://drive.google.com/uc?export=download&id=1CiPTwiGiWgRjdZnnZqVOoUz-isDTzaeF", "_blank")
+    const handleDownload = (os: string) => {
+        const links: Record<string, string> = {
+            windows: "https://drive.google.com/uc?export=download&id=1CiPTwiGiWgRjdZnnZqVOoUz-isDTzaeF",
+            macos: "https://drive.google.com/uc?export=download&id=1CiPTwiGiWgRjdZnnZqVOoUz-isDTzaeF", // Update with macOS link
+            linux: "https://drive.google.com/uc?export=download&id=1CiPTwiGiWgRjdZnnZqVOoUz-isDTzaeF", // Update with Linux link
+        }
+        window.open(links[os], "_blank")
     }
 
     return (
@@ -49,16 +54,34 @@ export default function AnalyzerDownloadPage() {
                             The Posture Analyzer is a lightweight desktop app that uses your webcam to monitor ergonomics in real-time. It runs 100% locally for ultimate privacy.
                         </p>
 
-                        <div className="flex flex-col sm:flex-row gap-4 mb-12">
-                            <Button
-                                onClick={handleDownload}
-                                size="lg"
-                                className="bg-slate-900 hover:bg-slate-800 text-white font-bold h-14 px-8 rounded-2xl shadow-xl shadow-slate-900/10 flex items-center gap-3 transition-transform hover:scale-105 active:scale-95 group"
-                            >
-                                <Download className="w-5 h-5 group-hover:animate-bounce" />
-                                Download for Windows
-                            </Button>
-                            <div className="flex items-center gap-3 px-4 py-2 rounded-2xl border border-slate-200 bg-white/50 backdrop-blur">
+                        <div className="flex flex-col gap-5 mb-12">
+                            <div className="flex flex-wrap items-center gap-3">
+                                <Button
+                                    onClick={() => handleDownload("windows")}
+                                    size="lg"
+                                    className="bg-slate-900 hover:bg-slate-800 text-white font-bold h-12 px-6 rounded-2xl shadow-xl shadow-slate-900/10 flex items-center gap-2 transition-transform hover:scale-105 active:scale-95 group"
+                                >
+                                    <Download className="w-4 h-4 group-hover:animate-bounce" />
+                                    Windows
+                                </Button>
+                                <Button
+                                    onClick={() => handleDownload("macos")}
+                                    size="lg"
+                                    className="bg-slate-900 hover:bg-slate-800 text-white font-bold h-12 px-6 rounded-2xl shadow-xl shadow-slate-900/10 flex items-center gap-2 transition-transform hover:scale-105 active:scale-95 group"
+                                >
+                                    <Download className="w-4 h-4 group-hover:animate-bounce" />
+                                    macOS
+                                </Button>
+                                <Button
+                                    onClick={() => handleDownload("linux")}
+                                    size="lg"
+                                    className="bg-slate-900 hover:bg-slate-800 text-white font-bold h-12 px-6 rounded-2xl shadow-xl shadow-slate-900/10 flex items-center gap-2 transition-transform hover:scale-105 active:scale-95 group"
+                                >
+                                    <Download className="w-4 h-4 group-hover:animate-bounce" />
+                                    Linux
+                                </Button>
+                            </div>
+                            <div className="flex items-center gap-3 px-4 py-2 rounded-2xl border border-slate-200 bg-white/50 backdrop-blur self-start">
                                 <div className="p-1.5 bg-green-100 rounded-lg">
                                     <ShieldCheck className="w-4 h-4 text-green-600" />
                                 </div>
