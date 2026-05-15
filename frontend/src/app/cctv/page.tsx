@@ -80,7 +80,12 @@ export default function CCTVProductPage() {
                                     ) : (
                                         <Download className="w-4 h-4 group-hover:animate-bounce" />
                                     )}
-                                    Download for {selectedOS === 'windows' ? 'Windows' : selectedOS === 'macos' ? 'macOS' : 'Linux'}
+                                    <span className="flex items-center gap-2">
+                                        Download for
+                                        {selectedOS === 'windows' && <WindowsIcon className="w-5 h-5" />}
+                                        {selectedOS === 'macos' && <AppleIcon className="w-5 h-5" />}
+                                        {selectedOS === 'linux' && <LinuxIcon className="w-5 h-5" />}
+                                    </span>
                                 </Button>
                                 
                                 <div className="h-8 w-[1px] bg-slate-700 mx-1"></div>

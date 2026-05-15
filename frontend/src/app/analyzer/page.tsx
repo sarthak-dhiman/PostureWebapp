@@ -62,7 +62,12 @@ export default function AnalyzerDownloadPage() {
                                     className="bg-transparent hover:bg-slate-800 text-white font-bold h-12 px-6 rounded-xl flex-grow flex items-center gap-2 transition-transform active:scale-95 group shadow-none"
                                 >
                                     <Download className="w-5 h-5 group-hover:animate-bounce" />
-                                    Download for {selectedOS === 'windows' ? 'Windows' : selectedOS === 'macos' ? 'macOS' : 'Linux'}
+                                    <span className="flex items-center gap-2">
+                                        Download for
+                                        {selectedOS === 'windows' && <WindowsIcon className="w-5 h-5" />}
+                                        {selectedOS === 'macos' && <AppleIcon className="w-5 h-5" />}
+                                        {selectedOS === 'linux' && <LinuxIcon className="w-5 h-5" />}
+                                    </span>
                                 </Button>
                                 
                                 <div className="h-8 w-[1px] bg-slate-700 mx-1"></div>
